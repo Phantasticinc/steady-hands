@@ -11,26 +11,33 @@ import * as THREE from './vendor/three.module.js';
  */
 export class Studio3DEngine {
   constructor() {
-    this.canvas = document.createElement('canvas');
-    this.canvas.width = 720;
-    this.canvas.height = 820;
+    this.available = false;
+    try {
+      this.canvas = document.createElement('canvas');
+      this.canvas.width = 720;
+      this.canvas.height = 820;
 
-    this.renderer = new THREE.WebGLRenderer({
-      canvas: this.canvas,
-      alpha: true,
-      antialias: true,
-      powerPreference: 'high-performance',
-      preserveDrawingBuffer: true
-    });
-    this.renderer.setSize(720, 820, false);
-    this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    this.renderer.toneMappingExposure = 1.22;
-    this.renderer.outputColorSpace = THREE.SRGBColorSpace;
+      this.renderer = new THREE.WebGLRenderer({
+        canvas: this.canvas,
+        alpha: true,
+        antialias: true,
+        powerPreference: 'high-performance',
+        preserveDrawingBuffer: true
+      });
+      this.renderer.setSize(720, 820, false);
+      this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      this.renderer.toneMappingExposure = 1.22;
+      this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
-    this.envMap = this.createStudioEnvMap();
-    this.initBalloonScene();
-    this.initPop3DScene();
-    this.initBreatheScene();
+      this.envMap = this.createStudioEnvMap();
+      this.initBalloonScene();
+      this.initPop3DScene();
+      this.initBreatheScene();
+      this.available = true;
+    } catch (err) {
+      console.warn('Studio3DEngine fallback:', err);
+      this.available = false;
+    }
   }
 
   createStudioEnvMap() {
@@ -241,6 +248,7 @@ export class Studio3DEngine {
   }
 
   renderBalloon3D(targetCtx, width, height, timeSec, sim, alchemy) {
+    if (!this.available || !this.renderer) return false;
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.renderer.setSize(width, height, false);
       this.balloonCamera.aspect = width / height;
@@ -366,8 +374,14 @@ export class Studio3DEngine {
       0
     );
 
-    this.renderer.render(this.balloonScene, this.balloonCamera);
-    targetCtx.drawImage(this.canvas, 0, 0, width, height);
+    try {
+      this.renderer.render(this.balloonScene, this.balloonCamera);
+      targetCtx.drawImage(this.canvas, 0, 0, width, height);
+      return true;
+    } catch (e) {
+      this.available = false;
+      return false;
+    }
   }
 
   /* ========================================================================
@@ -431,6 +445,7 @@ export class Studio3DEngine {
   }
 
   renderPopTray3D(targetCtx, width, height, fluxSim, poppedMap) {
+    if (!this.available || !this.renderer) return false;
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.renderer.setSize(width, height, false);
       this.popCamera.aspect = width / height;
@@ -451,8 +466,14 @@ export class Studio3DEngine {
       d.mat.emissiveIntensity = poppedMap[i] ? 0.12 : 0.32;
     }
 
-    this.renderer.render(this.popScene, this.popCamera);
-    targetCtx.drawImage(this.canvas, 0, 0, width, height);
+    try {
+      this.renderer.render(this.popScene, this.popCamera);
+      targetCtx.drawImage(this.canvas, 0, 0, width, height);
+      return true;
+    } catch (e) {
+      this.available = false;
+      return false;
+    }
   }
 
   /* ========================================================================
@@ -548,6 +569,7 @@ export class Studio3DEngine {
   }
 
   renderBreathe3D(targetCtx, width, height, dt, timeSec, scaleFactor, phase, rotX, rotY) {
+    if (!this.available || !this.renderer) return false;
     if (this.canvas.width !== width || this.canvas.height !== height) {
       this.renderer.setSize(width, height, false);
       this.breatheCamera.aspect = width / height;
@@ -598,7 +620,13 @@ export class Studio3DEngine {
     }
     attr.needsUpdate = true;
 
-    this.renderer.render(this.breatheScene, this.breatheCamera);
-    targetCtx.drawImage(this.canvas, 0, 0, width, height);
+    try {
+      this.renderer.render(this.breatheScene, this.breatheCamera);
+      targetCtx.drawImage(this.canvas, 0, 0, width, height);
+      return true;
+    } catch (e) {
+      this.available = false;
+      return false;
+    }
   }
 }

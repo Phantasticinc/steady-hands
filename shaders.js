@@ -364,6 +364,17 @@ function createProgram(gl, vsSrc, fsSrc) {
 
 export class StudioShaderPipeline {
   constructor() {
+    this.available = false;
+    try {
+      this._initGL();
+      this.available = !!this.gl;
+    } catch (err) {
+      console.warn('StudioShaderPipeline fallback:', err);
+      this.available = false;
+    }
+  }
+
+  _initGL() {
     this.canvas = document.createElement('canvas');
     this.canvas.width = 720;
     this.canvas.height = 820;

@@ -1,6 +1,6 @@
-import { TactileAudioEngine } from './audio.js';
-import { StudioShaderPipeline } from './shaders.js';
-import { Studio3DEngine } from './studio3d.js';
+import { TactileAudioEngine } from './audio.js?v=6';
+import { StudioShaderPipeline } from './shaders.js?v=6';
+import { Studio3DEngine } from './studio3d.js?v=6';
 
 const STORAGE_KEY = 'steadyhands_fidget_state_v4';
 const audio = new TactileAudioEngine();
@@ -681,7 +681,18 @@ function renderBalloonFrame(dt, nowMs) {
   shaderPipe.renderFluid(ctx, w, h, timeSec, shaderMode, activeMetaballs, []);
 
   // 2. Composite the Three.js 3D Deformable PBR Balloon on top
-  studio3D.renderBalloon3D(ctx, w, h, timeSec, balloonSim, state.balloonAlchemy);
+  if (!studio3D.renderBalloon3D(ctx, w, h, timeSec, balloonSim, state.balloonAlchemy)) {
+    const cx = balloonSim.cx + balloonSim.offsetX * 75;
+    const cy = balloonSim.cy + balloonSim.offsetY * 75;
+    const g = ctx.createRadialGradient(cx - 55, cy - 65, 18, cx, cy, 185);
+    g.addColorStop(0, '#bae6fd');
+    g.addColorStop(0.5, '#0284c7');
+    g.addColorStop(1, '#082f49');
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, 175 * (1 + balloonSim.stretchX), 185 * (1 + balloonSim.stretchY), balloonSim.twistAngle * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   // 3. Expanding shockwave rings on burst
   for (let i = balloonSim.shockwaves.length - 1; i >= 0; i--) {
@@ -2566,14 +2577,28 @@ function masterLoop(nowMs) {
 }
 
 function registerServiceWorker() {
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
-    });
-  }
+  if (!('serviceWorker' in navigator)) return;
+  navigator.serviceWorker
+    .register('./sw.js?v=6')
+    .then((reg) => {
+      reg.update().catch(() => {});
+      if (reg.waiting) {
+        reg.waiting.postMessage({ type: 'SKIP_WAITING' });
+      }
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            nw.postMessage({ type: 'SKIP_WAITING' });
+          }
+        });
+      });
+    })
+    .catch(() => {});
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function bootstrapApp() {
   loadState();
   applyPreferencesUI();
   initTopBarAndSheet();
@@ -2586,4 +2611,10 @@ document.addEventListener('DOMContentLoaded', () => {
   initBreatheStage();
   registerServiceWorker();
   requestAnimationFrame(masterLoop);
-});
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', bootstrapApp);
+} else {
+  bootstrapApp();
+}
