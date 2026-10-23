@@ -1,7 +1,11 @@
 import { TactileAudioEngine } from './audio.js';
+import { StudioShaderPipeline } from './shaders.js';
+import { Studio3DEngine } from './studio3d.js';
 
-const STORAGE_KEY = 'steadyhands_fidget_state_v3';
+const STORAGE_KEY = 'steadyhands_fidget_state_v4';
 const audio = new TactileAudioEngine();
+const shaderPipe = new StudioShaderPipeline();
+const studio3D = new Studio3DEngine();
 
 const state = {
   activeTab: 'balloon',
@@ -39,7 +43,7 @@ const state = {
   poppedMap: new Array(25).fill(false),
 
   // 5. Switch Mechatronic Module
-  sliderPos: 0.25, // 0..1
+  sliderPos: 0.25,
   sliderVel: 0,
   sliderDetent: 1,
   dialAngle: 35,
@@ -65,9 +69,6 @@ function loadState() {
     if (typeof saved.haptics === 'boolean') state.haptics = saved.haptics;
     if (typeof saved.totalInteractions === 'number') state.totalInteractions = saved.totalInteractions;
     if (typeof saved.urgesSurfed === 'number') state.urgesSurfed = saved.urgesSurfed;
-    if (Array.isArray(saved.poppedMap) && saved.poppedMap.length === 25) {
-      state.poppedMap = saved.poppedMap;
-    }
   } catch (_) {}
 }
 
@@ -82,8 +83,7 @@ function saveState() {
         sound: state.sound,
         haptics: state.haptics,
         totalInteractions: state.totalInteractions,
-        urgesSurfed: state.urgesSurfed,
-        poppedMap: state.poppedMap
+        urgesSurfed: state.urgesSurfed
       })
     );
   } catch (_) {}
@@ -99,21 +99,19 @@ function recordInteraction(count = 1) {
 function formatMMSS(sec) {
   const s = Math.max(0, Math.ceil(sec));
   const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${m}:${r < 10 ? '0' : ''}${r}`;
+  const rem = s % 60;
+  return `${m}:${rem < 10 ? '0' : ''}${rem}`;
 }
 
 function toCanvasPos(canvas, clientX, clientY) {
   const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / Math.max(1, rect.width);
+  const scaleY = canvas.height / Math.max(1, rect.height);
   return {
-    x: ((clientX - rect.left) / Math.max(1, rect.width)) * canvas.width,
-    y: ((clientY - rect.top) / Math.max(1, rect.height)) * canvas.height
+    x: (clientX - rect.left) * scaleX,
+    y: (clientY - rect.top) * scaleY
   };
 }
-
-/* ==========================================================================
-   TOP BAR, SETTINGS SHEET & DOCK NAVIGATION
-   ========================================================================== */
 
 function applyPreferencesUI() {
   document.body.dataset.theme = state.theme;
@@ -130,176 +128,188 @@ function applyPreferencesUI() {
     lowStimBtn.setAttribute('aria-pressed', String(state.lowStim));
   }
 
-  const pitchBtn = document.getElementById('pitchModeBtn');
-  if (pitchBtn) {
-    pitchBtn.classList.toggle('active', state.uniformPitch);
-    pitchBtn.setAttribute('aria-pressed', String(state.uniformPitch));
+  const pitchModeBtn = document.getElementById('pitchModeBtn');
+  if (pitchModeBtn) {
+    pitchModeBtn.classList.toggle('active', state.uniformPitch);
+    pitchModeBtn.setAttribute('aria-pressed', String(state.uniformPitch));
   }
 
-  const soundBtn = document.getElementById('soundToggleBtn');
-  const soundStatus = document.getElementById('soundStatusText');
-  if (soundBtn && soundStatus) {
-    soundBtn.classList.toggle('active', state.sound);
-    soundBtn.setAttribute('aria-pressed', String(state.sound));
-    soundStatus.textContent = state.sound ? 'On (Synthesized)' : 'Muted';
+  const soundToggleBtn = document.getElementById('soundToggleBtn');
+  const soundStatusText = document.getElementById('soundStatusText');
+  if (soundToggleBtn) {
+    soundToggleBtn.classList.toggle('active', state.sound);
+    soundToggleBtn.setAttribute('aria-pressed', String(state.sound));
+  }
+  if (soundStatusText) {
+    soundStatusText.textContent = state.sound ? 'On (Synthesized)' : 'Muted';
   }
 
-  const hapticBtn = document.getElementById('hapticToggleBtn');
-  const hapticStatus = document.getElementById('hapticStatusText');
-  if (hapticBtn && hapticStatus) {
-    hapticBtn.classList.toggle('active', state.haptics);
-    hapticBtn.setAttribute('aria-pressed', String(state.haptics));
-    hapticStatus.textContent = state.haptics ? 'On (Device vibrate)' : 'Off';
+  const hapticToggleBtn = document.getElementById('hapticToggleBtn');
+  const hapticStatusText = document.getElementById('hapticStatusText');
+  if (hapticToggleBtn) {
+    hapticToggleBtn.classList.toggle('active', state.haptics);
+    hapticToggleBtn.setAttribute('aria-pressed', String(state.haptics));
+  }
+  if (hapticStatusText) {
+    hapticStatusText.textContent = state.haptics ? 'On (Device vibrate)' : 'Off';
   }
 
-  document.querySelectorAll('[data-theme-choice]').forEach((btn) => {
+  document.querySelectorAll('#themeGroup .seg-choice').forEach((btn) => {
     btn.classList.toggle('active', btn.dataset.themeChoice === state.theme);
   });
 
-  const badge = document.getElementById('ambientBadge');
-  if (badge) {
-    const labels = { off: '', brown: 'Brown', rain: 'Rain', hum40: '40Hz' };
-    if (state.ambient !== 'off') {
-      badge.textContent = labels[state.ambient] || 'Calm';
-      badge.hidden = false;
-    } else if (state.focusRemainingSec > 0) {
-      badge.textContent = formatMMSS(state.focusRemainingSec);
-      badge.hidden = false;
-    } else {
-      badge.hidden = true;
-    }
-  }
-
   const urgesEl = document.getElementById('urgesSurfedCount');
   if (urgesEl) urgesEl.textContent = String(state.urgesSurfed);
+
   const totalEl = document.getElementById('totalInteractionsCount');
   if (totalEl) totalEl.textContent = state.totalInteractions.toLocaleString();
 }
 
 function initTopBarAndSheet() {
   const urgeBtn = document.getElementById('urgeTimerBtn');
-  const urgeText = document.getElementById('urgeTimerText');
   const urgeFill = document.getElementById('urgeProgressFill');
+  const urgeText = document.getElementById('urgeTimerText');
+  const brandLed = document.getElementById('brandLed');
 
   function updateUrgeUI() {
-    if (!state.urgeActive) {
-      urgeBtn.classList.remove('running');
-      urgeBtn.setAttribute('aria-pressed', 'false');
-      urgeText.textContent = '3:00';
-      urgeFill.style.width = '0%';
-      return;
-    }
-    urgeBtn.classList.add('running');
-    urgeBtn.setAttribute('aria-pressed', 'true');
+    if (!urgeBtn || !urgeFill || !urgeText) return;
+    urgeBtn.classList.toggle('running', state.urgeActive);
+    urgeBtn.setAttribute('aria-pressed', String(state.urgeActive));
     urgeText.textContent = formatMMSS(state.urgeRemainingSec);
-    const pct = ((180 - state.urgeRemainingSec) / 180) * 100;
+    const pct = state.urgeActive ? ((180 - state.urgeRemainingSec) / 180) * 100 : 0;
     urgeFill.style.width = `${Math.min(100, Math.max(0, pct)).toFixed(1)}%`;
+    if (brandLed) {
+      brandLed.style.background = state.urgeActive ? 'var(--accent-warm)' : 'var(--accent-calm)';
+      brandLed.style.boxShadow = state.urgeActive
+        ? '0 0 12px var(--accent-warm)'
+        : '0 0 10px var(--accent-calm)';
+    }
   }
 
-  urgeBtn.addEventListener('click', () => {
-    audio.init();
-    if (state.urgeActive) {
-      clearInterval(state.urgeInterval);
-      state.urgeActive = false;
-      state.urgeRemainingSec = 180;
-      audio.playCubeButton('silent-1');
+  if (urgeBtn) {
+    urgeBtn.addEventListener('click', () => {
+      audio.init();
+      audio.playCubeButton('clicky');
+      if (state.urgeActive) {
+        state.urgeActive = false;
+        clearInterval(state.urgeInterval);
+        state.urgeInterval = null;
+        state.urgeRemainingSec = 180;
+      } else {
+        state.urgeActive = true;
+        state.urgeRemainingSec = 180;
+        clearInterval(state.urgeInterval);
+        state.urgeInterval = setInterval(() => {
+          state.urgeRemainingSec -= 1;
+          if (state.urgeRemainingSec <= 0) {
+            clearInterval(state.urgeInterval);
+            state.urgeInterval = null;
+            state.urgeActive = false;
+            state.urgeRemainingSec = 180;
+            state.urgesSurfed += 1;
+            audio.playBreathCue('inhale');
+            applyPreferencesUI();
+            saveState();
+          }
+          updateUrgeUI();
+        }, 1000);
+      }
       updateUrgeUI();
-    } else {
-      state.urgeActive = true;
-      state.urgeRemainingSec = 180;
-      audio.playBreathCue('inhale');
-      updateUrgeUI();
-      state.urgeInterval = setInterval(() => {
-        state.urgeRemainingSec -= 1;
-        if (state.urgeRemainingSec <= 0) {
-          clearInterval(state.urgeInterval);
-          state.urgeActive = false;
-          state.urgeRemainingSec = 180;
-          state.urgesSurfed += 1;
-          saveState();
-          audio.playBreathCue('inhale');
-          applyPreferencesUI();
-        }
-        updateUrgeUI();
-      }, 1000);
-    }
-  });
+    });
+  }
 
   const sheet = document.getElementById('settingsSheet');
-  document.getElementById('drawerBtn').addEventListener('click', () => {
-    sheet.hidden = false;
-  });
-  document.getElementById('closeSheetBtn').addEventListener('click', () => {
-    sheet.hidden = true;
-  });
-  sheet.addEventListener('click', (e) => {
-    if (e.target === sheet) sheet.hidden = true;
-  });
+  const drawerBtn = document.getElementById('drawerBtn');
+  const closeSheetBtn = document.getElementById('closeSheetBtn');
 
-  document.getElementById('lowStimBtn').addEventListener('click', () => {
+  if (drawerBtn && sheet) {
+    drawerBtn.addEventListener('click', () => {
+      audio.init();
+      sheet.hidden = false;
+    });
+  }
+  if (closeSheetBtn && sheet) {
+    closeSheetBtn.addEventListener('click', () => {
+      sheet.hidden = true;
+    });
+  }
+  if (sheet) {
+    sheet.addEventListener('click', (e) => {
+      if (e.target === sheet) sheet.hidden = true;
+    });
+  }
+
+  document.getElementById('lowStimBtn')?.addEventListener('click', () => {
     state.lowStim = !state.lowStim;
     applyPreferencesUI();
     saveState();
   });
 
-  document.getElementById('pitchModeBtn').addEventListener('click', () => {
+  document.getElementById('pitchModeBtn')?.addEventListener('click', () => {
     state.uniformPitch = !state.uniformPitch;
     applyPreferencesUI();
-    audio.playPop(2, 2, false);
     saveState();
   });
 
-  document.getElementById('soundToggleBtn').addEventListener('click', () => {
+  document.getElementById('soundToggleBtn')?.addEventListener('click', () => {
     state.sound = !state.sound;
     applyPreferencesUI();
     saveState();
   });
 
-  document.getElementById('hapticToggleBtn').addEventListener('click', () => {
+  document.getElementById('hapticToggleBtn')?.addEventListener('click', () => {
     state.haptics = !state.haptics;
     applyPreferencesUI();
-    if (state.haptics) audio.vibrate(12);
     saveState();
   });
 
+  const ambientBadge = document.getElementById('ambientBadge');
   document.querySelectorAll('#ambientGroup .seg-choice').forEach((btn) => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('#ambientGroup .seg-choice').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
-      state.ambient = btn.dataset.ambient || 'off';
-      audio.setAmbientMode(state.ambient);
-      applyPreferencesUI();
+      audio.init();
+      const mode = btn.dataset.ambient || 'off';
+      state.ambient = mode;
+      document.querySelectorAll('#ambientGroup .seg-choice').forEach((b) =>
+        b.classList.toggle('active', b === btn)
+      );
+      audio.setAmbientMode(mode);
+      if (ambientBadge) {
+        if (mode === 'off') {
+          ambientBadge.hidden = true;
+        } else {
+          ambientBadge.hidden = false;
+          ambientBadge.textContent =
+            mode === 'brown' ? 'Brown' : mode === 'rain' ? 'Rain' : '40Hz';
+        }
+      }
     });
   });
 
   const focusRemainingText = document.getElementById('focusRemainingText');
   document.querySelectorAll('#focusGroup .seg-choice').forEach((btn) => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('#focusGroup .seg-choice').forEach((b) => b.classList.remove('active'));
-      btn.classList.add('active');
       const sec = parseInt(btn.dataset.focus || '0', 10);
+      document.querySelectorAll('#focusGroup .seg-choice').forEach((b) =>
+        b.classList.toggle('active', b === btn)
+      );
       clearInterval(state.focusInterval);
       state.focusDurationSec = sec;
       state.focusRemainingSec = sec;
-
-      if (sec > 0) {
-        focusRemainingText.textContent = formatMMSS(sec);
-        state.focusInterval = setInterval(() => {
-          state.focusRemainingSec -= 1;
-          if (state.focusRemainingSec <= 0) {
-            clearInterval(state.focusInterval);
-            state.focusRemainingSec = 0;
-            focusRemainingText.textContent = 'Complete';
-            audio.playBreathCue('inhale');
-          } else {
-            focusRemainingText.textContent = formatMMSS(state.focusRemainingSec);
-          }
-          applyPreferencesUI();
-        }, 1000);
-      } else {
-        focusRemainingText.textContent = 'Off';
+      if (sec <= 0) {
+        if (focusRemainingText) focusRemainingText.textContent = 'Off';
+        return;
       }
-      applyPreferencesUI();
+      if (focusRemainingText) focusRemainingText.textContent = formatMMSS(sec);
+      state.focusInterval = setInterval(() => {
+        state.focusRemainingSec -= 1;
+        if (state.focusRemainingSec <= 0) {
+          clearInterval(state.focusInterval);
+          if (focusRemainingText) focusRemainingText.textContent = 'Done';
+          audio.playBreathCue('inhale');
+        } else if (focusRemainingText) {
+          focusRemainingText.textContent = formatMMSS(state.focusRemainingSec);
+        }
+      }, 1000);
     });
   });
 
@@ -311,17 +321,16 @@ function initTopBarAndSheet() {
     });
   });
 
-  document.getElementById('logUrgeSurfedBtn').addEventListener('click', () => {
+  document.getElementById('logUrgeSurfedBtn')?.addEventListener('click', () => {
     state.urgesSurfed += 1;
     audio.playBreathCue('inhale');
     applyPreferencesUI();
     saveState();
   });
 
-  document.getElementById('resetDataBtn').addEventListener('click', () => {
-    state.totalInteractions = 0;
+  document.getElementById('resetDataBtn')?.addEventListener('click', () => {
     state.urgesSurfed = 0;
-    state.poppedMap.fill(false);
+    state.totalInteractions = 0;
     applyPreferencesUI();
     saveState();
   });
@@ -329,7 +338,7 @@ function initTopBarAndSheet() {
 
 function initDockNavigation() {
   const tabs = document.querySelectorAll('.dock-tab');
-  const stages = {
+  const panels = {
     balloon: document.getElementById('panel-balloon'),
     pour: document.getElementById('panel-pour'),
     beads: document.getElementById('panel-beads'),
@@ -340,397 +349,413 @@ function initDockNavigation() {
 
   tabs.forEach((tab) => {
     tab.addEventListener('click', () => {
-      const target = tab.dataset.tab;
-      if (!target || !stages[target]) return;
+      const target = tab.dataset.tab || 'balloon';
       state.activeTab = target;
-
       tabs.forEach((t) => {
-        const active = t.dataset.tab === target;
+        const active = t === tab;
         t.classList.toggle('active', active);
         t.setAttribute('aria-selected', String(active));
       });
-
-      Object.entries(stages).forEach(([key, el]) => {
-        if (!el) return;
-        if (key === target) {
-          el.hidden = false;
-          el.classList.add('active');
-        } else {
-          el.hidden = true;
-          el.classList.remove('active');
-        }
+      Object.entries(panels).forEach(([key, panel]) => {
+        if (!panel) return;
+        const show = key === target;
+        panel.hidden = !show;
+        panel.classList.toggle('active', show);
       });
-
-      audio.stopWorryHum();
       audio.stopBalloonStrain();
       audio.stopPourStream();
+      audio.stopWorryHum();
       audio.vibrate(6);
     });
   });
 }
 
 /* ==========================================================================
-   1. BALLOON: SOFT-BODY PRESSURIZED MEMBRANE & BURST ALCHEMY
+   1. BALLOON: 3D DEFORMABLE PBR LATEX MESH + MULTI-TOUCH GRAB/PINCH/TWIST
    ========================================================================== */
 
 const balloonSim = {
-  nodes: [],
-  numNodes: 32,
   cx: 360,
-  cy: 430,
+  cy: 410,
   baseR: 185,
   pressure: 0, // 0..1
   squeezing: false,
   pointerX: 360,
-  pointerY: 430,
+  pointerY: 410,
+  pointers: new Map(), // pointerId -> { startX, startY, x, y }
+  activeFingers: [],
+  offsetX: 0,
+  offsetY: 0,
+  velOffsetX: 0,
+  velOffsetY: 0,
+  stretchX: 0,
+  stretchY: 0,
+  velStretchX: 0,
+  velStretchY: 0,
+  pinchSqueeze: 0,
+  twistAngle: 0,
+  velTwist: 0,
+  jellyEnergy: 0.15,
   bursting: false,
   respawnScale: 1,
   particles: [],
-  shockwaves: [],
-  internalBubbles: []
+  screenDrops: [],
+  shockwaves: []
 };
+
+function resetBalloonFresh() {
+  balloonSim.bursting = false;
+  balloonSim.respawnScale = 0.25;
+  balloonSim.pressure = 0;
+  balloonSim.stretchX = 0;
+  balloonSim.stretchY = 0;
+  balloonSim.pinchSqueeze = 0;
+  balloonSim.twistAngle = 0;
+  balloonSim.jellyEnergy = 0.55;
+  balloonSim.particles.length = 0;
+  balloonSim.screenDrops.length = 0;
+  audio.vibrate(10);
+}
 
 function initBalloonStage() {
   const canvas = document.getElementById('balloonCanvas');
   if (!canvas) return;
 
-  for (let i = 0; i < balloonSim.numNodes; i++) {
-    const a = (i / balloonSim.numNodes) * Math.PI * 2;
-    balloonSim.nodes.push({ angle: a, r: balloonSim.baseR, vr: 0 });
-  }
-  for (let i = 0; i < 26; i++) {
-    balloonSim.internalBubbles.push({
-      ox: (Math.random() - 0.5) * 210,
-      oy: (Math.random() - 0.5) * 240,
-      r: 5 + Math.random() * 14,
-      phase: Math.random() * Math.PI * 2,
-      speed: 0.8 + Math.random() * 1.4
-    });
-  }
-
-  function onPointer(e) {
-    const pt = toCanvasPos(canvas, e.clientX, e.clientY);
-    balloonSim.pointerX = pt.x;
-    balloonSim.pointerY = pt.y;
-  }
-
   canvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
-    onPointer(e);
-    if (balloonSim.bursting && balloonSim.respawnScale > 0.4) {
+    audio.init();
+    const pt = toCanvasPos(canvas, e.clientX, e.clientY);
+    balloonSim.pointers.set(e.pointerId, {
+      startX: pt.x,
+      startY: pt.y,
+      x: pt.x,
+      y: pt.y
+    });
+    balloonSim.pointerX = pt.x;
+    balloonSim.pointerY = pt.y;
+
+    if (balloonSim.bursting && balloonSim.respawnScale > 0.35) {
       balloonSim.bursting = false;
       balloonSim.pressure = 0;
     }
     balloonSim.squeezing = true;
+    balloonSim.jellyEnergy = Math.min(1.0, balloonSim.jellyEnergy + 0.35);
+    audio.playBalloonStretch(Math.max(0.2, balloonSim.pressure), state.balloonAlchemy);
     recordInteraction(1);
   });
 
   canvas.addEventListener('pointermove', (e) => {
-    if (!balloonSim.squeezing) return;
-    onPointer(e);
+    const rec = balloonSim.pointers.get(e.pointerId);
+    if (!rec) return;
+    const pt = toCanvasPos(canvas, e.clientX, e.clientY);
+    rec.x = pt.x;
+    rec.y = pt.y;
+    balloonSim.pointerX = pt.x;
+    balloonSim.pointerY = pt.y;
   });
 
-  const endSqueeze = () => {
-    if (!balloonSim.squeezing) return;
-    balloonSim.squeezing = false;
-    audio.stopBalloonStrain();
+  const endPointer = (e) => {
+    balloonSim.pointers.delete(e.pointerId);
+    if (balloonSim.pointers.size === 0) {
+      if (balloonSim.squeezing && !balloonSim.bursting) {
+        balloonSim.jellyEnergy = Math.min(1.2, 0.45 + balloonSim.pressure * 0.75);
+      }
+      balloonSim.squeezing = false;
+      audio.stopBalloonStrain();
+    }
   };
-  canvas.addEventListener('pointerup', endSqueeze);
-  canvas.addEventListener('pointercancel', endSqueeze);
 
-  document.querySelectorAll('[data-alchemy]').forEach((btn) => {
+  canvas.addEventListener('pointerup', endPointer);
+  canvas.addEventListener('pointercancel', endPointer);
+
+  document.querySelectorAll('#panel-balloon .quiet-pill').forEach((btn) => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('[data-alchemy]').forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('#panel-balloon .quiet-pill').forEach((b) =>
+        b.classList.remove('active')
+      );
       btn.classList.add('active');
       state.balloonAlchemy = btn.dataset.alchemy || 'water';
+      balloonSim.jellyEnergy = 0.45;
       audio.vibrate(7);
     });
+  });
+
+  document.getElementById('inflateBalloonBtn')?.addEventListener('click', () => {
+    audio.init();
+    resetBalloonFresh();
   });
 }
 
 function triggerBalloonBurst() {
   balloonSim.bursting = true;
   balloonSim.squeezing = false;
+  balloonSim.pointers.clear();
   balloonSim.respawnScale = 0.01;
   balloonSim.pressure = 0;
+  balloonSim.jellyEnergy = 1.1;
+  audio.stopBalloonStrain();
   audio.playBalloonBurst(state.balloonAlchemy);
   recordInteraction(2);
 
-  balloonSim.shockwaves.push({ x: balloonSim.cx, y: balloonSim.cy, r: 40, alpha: 0.95 });
-  balloonSim.shockwaves.push({ x: balloonSim.cx, y: balloonSim.cy, r: 15, alpha: 0.75 });
+  const cx = balloonSim.cx + balloonSim.offsetX * 95;
+  const cy = balloonSim.cy + balloonSim.offsetY * 95;
 
+  balloonSim.shockwaves.push({ x: cx, y: cy, r: 45, alpha: 0.98 });
+  balloonSim.shockwaves.push({ x: cx, y: cy, r: 16, alpha: 0.8 });
+
+  // Spawn 95 metaball burst droplets
   for (let i = 0; i < 95; i++) {
-    const a = Math.random() * Math.PI * 2;
-    const spd = 160 + Math.random() * 540;
+    const a = (i / 95) * Math.PI * 2 + (Math.random() - 0.5) * 0.25;
+    const spd = 120 + Math.random() * 580;
     balloonSim.particles.push({
-      x: balloonSim.cx + Math.cos(a) * (20 + Math.random() * 90),
-      y: balloonSim.cy + Math.sin(a) * (20 + Math.random() * 90),
+      x: cx + Math.cos(a) * (18 + Math.random() * 75),
+      y: cy + Math.sin(a) * (18 + Math.random() * 75),
       vx: Math.cos(a) * spd,
-      vy: Math.sin(a) * spd - 90,
-      r: 5 + Math.random() * 13,
+      vy: Math.sin(a) * spd - 110,
+      r: 18 + Math.random() * 24,
       life: 1.0,
-      mode: state.balloonAlchemy,
-      hueShift: Math.random() * 45
+      hueShift: i / 95
+    });
+  }
+
+  // Spawn 18 screen-lens splatter droplets that stick to the glass & drip slowly
+  for (let i = 0; i < 18; i++) {
+    balloonSim.screenDrops.push({
+      x: 110 + Math.random() * 500,
+      y: 140 + Math.random() * 480,
+      r: 14 + Math.random() * 22,
+      vy: 18 + Math.random() * 45,
+      life: 1.0,
+      hueShift: Math.random()
     });
   }
 }
 
 function renderBalloonFrame(dt, nowMs) {
+  if (state.activeTab !== 'balloon') return;
   const canvas = document.getElementById('balloonCanvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const w = canvas.width;
   const h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
+  const timeSec = nowMs * 0.001;
 
-  const palMap = {
-    water: { core: '#38bdf8', deep: '#0369a1', glow: 'rgba(56, 189, 248, 0.42)', rim: '#bae6fd' },
-    chrome: { core: '#e2e8f0', deep: '#334155', glow: 'rgba(148, 163, 184, 0.45)', rim: '#ffffff' },
-    biolume: { core: '#a855f7', deep: '#0f766e', glow: 'rgba(45, 212, 191, 0.48)', rim: '#5eead4' }
-  };
-  const pal = palMap[state.balloonAlchemy] || palMap.water;
+  // Compute multi-touch manipulation forces from active pointers
+  const ptrs = Array.from(balloonSim.pointers.values());
+  balloonSim.activeFingers = ptrs.map((p) => ({
+    wx: ((p.x - balloonSim.cx) / 175) * 1.15,
+    wy: (-(p.y - balloonSim.cy) / 175) * 1.15,
+    pullX: Math.max(-1.3, Math.min(1.3, (p.x - p.startX) / 130)),
+    pullY: Math.max(-1.3, Math.min(1.3, -(p.y - p.startY) / 130))
+  }));
 
-  // Update & draw burst splash particles
-  for (let i = balloonSim.particles.length - 1; i >= 0; i--) {
-    const p = balloonSim.particles[i];
-    const grav = p.mode === 'biolume' ? 120 : 880;
-    p.vy += grav * dt;
-    p.x += p.vx * dt;
-    p.y += p.vy * dt;
+  let targetOffsetX = 0;
+  let targetOffsetY = 0;
+  let targetStretchX = 0;
+  let targetStretchY = 0;
+  let targetPinch = 0;
+  let targetTwist = 0;
 
-    if (p.x < p.r + 18) { p.x = p.r + 18; p.vx *= -0.65; }
-    if (p.x > w - p.r - 18) { p.x = w - p.r - 18; p.vx *= -0.65; }
-    if (p.y > h - p.r - 22) {
-      p.y = h - p.r - 22;
-      p.vy *= p.mode === 'chrome' ? -0.72 : -0.42;
-      p.vx *= 0.88;
-    }
+  if (ptrs.length === 1 && !balloonSim.bursting) {
+    const p0 = ptrs[0];
+    const dx = (p0.x - p0.startX) / 160;
+    const dy = (p0.y - p0.startY) / 160;
+    const dragDist = Math.hypot(dx, dy);
+    targetOffsetX = Math.max(-0.85, Math.min(0.85, dx * 0.75));
+    targetOffsetY = Math.max(-0.85, Math.min(0.85, dy * 0.75));
+    // Pulling stretches the balloon along the drag axis while squeezing the perpendicular axis
+    targetStretchX = Math.max(-0.28, Math.min(0.48, Math.abs(dx) * 0.52 - Math.abs(dy) * 0.18));
+    targetStretchY = Math.max(-0.28, Math.min(0.48, Math.abs(dy) * 0.52 - Math.abs(dx) * 0.18));
+    targetTwist = Math.max(-0.6, Math.min(0.6, dx * 0.45));
+    balloonSim.pressure = Math.min(1, balloonSim.pressure + dt * (0.42 + dragDist * 0.45));
+  } else if (ptrs.length >= 2 && !balloonSim.bursting) {
+    const p0 = ptrs[0];
+    const p1 = ptrs[1];
+    const startDist = Math.max(40, Math.hypot(p1.startX - p0.startX, p1.startY - p0.startY));
+    const curDist = Math.hypot(p1.x - p0.x, p1.y - p0.y);
+    const startAng = Math.atan2(p1.startY - p0.startY, p1.startX - p0.startX);
+    const curAng = Math.atan2(p1.y - p0.y, p1.x - p0.x);
 
-    p.life -= dt * 0.48;
-    if (p.life <= 0) {
-      balloonSim.particles.splice(i, 1);
-      continue;
-    }
-
-    ctx.save();
-    ctx.globalAlpha = Math.min(1, p.life * 1.3);
-    const g = ctx.createRadialGradient(p.x - p.r * 0.3, p.y - p.r * 0.3, 1, p.x, p.y, p.r);
-    if (p.mode === 'chrome') {
-      g.addColorStop(0, '#ffffff');
-      g.addColorStop(0.55, '#94a3b8');
-      g.addColorStop(1, '#1e293b');
-    } else if (p.mode === 'biolume') {
-      g.addColorStop(0, '#ccfbf1');
-      g.addColorStop(0.5, '#2dd4bf');
-      g.addColorStop(1, 'rgba(168, 85, 247, 0)');
+    const ratio = (curDist - startDist) / 180;
+    if (ratio < 0) {
+      // Pinching 2 fingers together squeezes the waist and spikes pressure!
+      targetPinch = Math.min(0.95, -ratio * 1.4);
+      balloonSim.pressure = Math.min(1, balloonSim.pressure + dt * (0.65 + targetPinch * 0.9));
     } else {
-      g.addColorStop(0, '#e0f2fe');
-      g.addColorStop(0.6, '#38bdf8');
-      g.addColorStop(1, '#0284c7');
+      // Pulling 2 fingers apart stretches the balloon like taffy!
+      targetStretchX = Math.min(0.62, ratio * 0.75);
+      targetStretchY = -targetStretchX * 0.35;
+      balloonSim.pressure = Math.min(1, balloonSim.pressure + dt * (0.45 + ratio * 0.6));
     }
-    ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-    ctx.fillStyle = g;
-    ctx.fill();
-    ctx.restore();
+    targetTwist = Math.max(-0.9, Math.min(0.9, curAng - startAng));
+  } else if (!balloonSim.bursting && balloonSim.squeezing) {
+    // Programmatic or single-hold squeeze
+    balloonSim.pressure = Math.min(1, balloonSim.pressure + dt * 0.56);
+    targetPinch = balloonSim.pressure * 0.45;
+  } else if (!balloonSim.bursting) {
+    balloonSim.pressure = Math.max(0, balloonSim.pressure - dt * 1.15);
   }
 
-  // Shockwave rings
-  for (let i = balloonSim.shockwaves.length - 1; i >= 0; i--) {
-    const sw = balloonSim.shockwaves[i];
-    sw.r += 620 * dt;
-    sw.alpha *= Math.pow(0.08, dt);
-    if (sw.alpha < 0.02) {
-      balloonSim.shockwaves.splice(i, 1);
-      continue;
-    }
-    ctx.beginPath();
-    ctx.arc(sw.x, sw.y, sw.r, 0, Math.PI * 2);
-    ctx.strokeStyle = pal.rim;
-    ctx.globalAlpha = sw.alpha;
-    ctx.lineWidth = 4;
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-  }
-
-  // Respawn inflation after burst
-  if (balloonSim.bursting) {
-    balloonSim.respawnScale += dt * 0.68;
-    if (balloonSim.respawnScale >= 1) {
-      balloonSim.respawnScale = 1;
-      balloonSim.bursting = false;
-      balloonSim.nodes.forEach((n) => {
-        n.r = balloonSim.baseR;
-        n.vr = 0;
-      });
-    }
-  }
-
-  // Squeeze pressure & soft-body membrane physics
-  if (!balloonSim.bursting && balloonSim.squeezing) {
-    balloonSim.pressure = Math.min(1, balloonSim.pressure + dt * 0.58);
+  if (balloonSim.squeezing && !balloonSim.bursting) {
     audio.updateBalloonStrain(balloonSim.pressure, state.balloonAlchemy);
     if (Math.random() < 0.35) audio.vibrate(6);
     if (balloonSim.pressure >= 0.995) {
       triggerBalloonBurst();
-      return;
     }
-  } else if (!balloonSim.bursting) {
-    balloonSim.pressure = Math.max(0, balloonSim.pressure - dt * 1.35);
   }
 
-  const scale = balloonSim.bursting ? Math.max(0.08, balloonSim.respawnScale) : 1;
-  const cx = balloonSim.cx;
-  const cy = balloonSim.cy + Math.sin(nowMs * 0.0025) * 6;
+  // Spring-damper integration for elastic recovery & jelly oscillation
+  balloonSim.velOffsetX += (targetOffsetX - balloonSim.offsetX) * 28 * dt;
+  balloonSim.velOffsetY += (targetOffsetY - balloonSim.offsetY) * 28 * dt;
+  balloonSim.velOffsetX *= Math.pow(0.06, dt);
+  balloonSim.velOffsetY *= Math.pow(0.06, dt);
+  balloonSim.offsetX += balloonSim.velOffsetX * dt;
+  balloonSim.offsetY += balloonSim.velOffsetY * dt;
 
-  // Update membrane nodes with conservation-of-volume bulge + finger indentation
-  const N = balloonSim.nodes.length;
-  for (let i = 0; i < N; i++) {
-    const node = balloonSim.nodes[i];
-    const a = node.angle;
-    const tearDrop = 1 + 0.12 * Math.sin(a) - 0.06 * Math.cos(2 * a);
-    let targetR = balloonSim.baseR * tearDrop * (1 + balloonSim.pressure * 0.14);
+  balloonSim.velStretchX += (targetStretchX - balloonSim.stretchX) * 32 * dt;
+  balloonSim.velStretchY += (targetStretchY - balloonSim.stretchY) * 32 * dt;
+  balloonSim.velStretchX *= Math.pow(0.05, dt);
+  balloonSim.velStretchY *= Math.pow(0.05, dt);
+  balloonSim.stretchX += balloonSim.velStretchX * dt;
+  balloonSim.stretchY += balloonSim.velStretchY * dt;
 
-    if (balloonSim.squeezing && !balloonSim.bursting) {
-      const nx = cx + Math.cos(a) * node.r;
-      const ny = cy + Math.sin(a) * node.r;
-      const dFinger = Math.hypot(nx - balloonSim.pointerX, ny - balloonSim.pointerY);
-      if (dFinger < 175) {
-        const indent = (1 - dFinger / 175) * (68 + balloonSim.pressure * 45);
-        targetR -= indent;
-      } else {
-        targetR += balloonSim.pressure * 34;
-      }
-      // High-pressure membrane tremor
-      if (balloonSim.pressure > 0.55) {
-        targetR += Math.sin(nowMs * 0.045 + i * 1.7) * (balloonSim.pressure - 0.55) * 18;
-      }
+  balloonSim.pinchSqueeze += (targetPinch - balloonSim.pinchSqueeze) * Math.min(1, dt * 10);
+  balloonSim.twistAngle += (targetTwist - balloonSim.twistAngle) * Math.min(1, dt * 10);
+  balloonSim.jellyEnergy *= Math.pow(0.22, dt);
+
+  if (balloonSim.bursting) {
+    balloonSim.respawnScale += dt * 0.62;
+    if (balloonSim.respawnScale >= 1) {
+      balloonSim.respawnScale = 1;
+      balloonSim.bursting = false;
+      balloonSim.jellyEnergy = 0.55;
     }
-
-    const prev = balloonSim.nodes[(i - 1 + N) % N];
-    const next = balloonSim.nodes[(i + 1) % N];
-    const neighborForce = (prev.r + next.r - 2 * node.r) * 18;
-    const springForce = (targetR - node.r) * 32;
-    node.vr += (springForce + neighborForce) * dt;
-    node.vr *= Math.pow(0.08, dt);
-    node.r += node.vr * dt;
   }
 
-  // Draw top machined inflation nozzle / tie knot
-  ctx.save();
-  ctx.fillStyle = pal.deep;
-  ctx.beginPath();
-  ctx.roundRect(cx - 22 * scale, cy - balloonSim.baseR * 1.05 * scale - 24, 44 * scale, 28 * scale, 10);
-  ctx.fill();
-  ctx.restore();
-
-  // Smooth closed Bezier membrane path
-  const pts = balloonSim.nodes.map((n) => ({
-    x: cx + Math.cos(n.angle) * n.r * scale,
-    y: cy + Math.sin(n.angle) * n.r * scale
-  }));
-
-  ctx.save();
-  ctx.shadowColor = pal.glow;
-  ctx.shadowBlur = 36 + balloonSim.pressure * 32;
-  ctx.beginPath();
-  for (let i = 0; i < N; i++) {
-    const p0 = pts[i];
-    const p1 = pts[(i + 1) % N];
-    const mx = (p0.x + p1.x) / 2;
-    const my = (p0.y + p1.y) / 2;
-    if (i === 0) ctx.moveTo(mx, my);
-    else ctx.quadraticCurveTo(p0.x, p0.y, mx, my);
+  // Update splashing metaball droplets & screen drips
+  const activeMetaballs = [];
+  for (let i = balloonSim.particles.length - 1; i >= 0; i--) {
+    const p = balloonSim.particles[i];
+    p.vy += 680 * dt;
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.life -= dt * 0.62;
+    if (p.x < 36 || p.x > w - 36) p.vx *= -0.7;
+    if (p.y > h - 36) {
+      p.y = h - 36;
+      p.vy *= -0.52;
+      p.vx *= 0.85;
+    }
+    if (p.life <= 0) {
+      balloonSim.particles.splice(i, 1);
+    } else {
+      activeMetaballs.push({
+        x: p.x,
+        y: p.y,
+        r: p.r * Math.min(1, p.life * 1.25),
+        hueShift: p.hueShift
+      });
+    }
   }
-  ctx.closePath();
 
-  const bodyGrad = ctx.createRadialGradient(
-    cx - 55 * scale,
-    cy - 70 * scale,
-    18 * scale,
-    cx,
-    cy,
-    balloonSim.baseR * 1.25 * scale
-  );
-  bodyGrad.addColorStop(0, pal.rim);
-  bodyGrad.addColorStop(0.38, pal.core);
-  bodyGrad.addColorStop(0.88, pal.deep);
-  bodyGrad.addColorStop(1, '#090d14');
-  ctx.fillStyle = bodyGrad;
-  ctx.fill();
+  for (let i = balloonSim.screenDrops.length - 1; i >= 0; i--) {
+    const d = balloonSim.screenDrops[i];
+    d.y += d.vy * dt;
+    d.life -= dt * 0.38;
+    if (d.life <= 0 || d.y > h + 30) {
+      balloonSim.screenDrops.splice(i, 1);
+    } else {
+      activeMetaballs.push({
+        x: d.x,
+        y: d.y,
+        r: d.r * Math.min(1, d.life * 1.15),
+        hueShift: d.hueShift
+      });
+    }
+  }
 
-  // Clip internal suspended bubbles / biolume spores inside membrane
-  ctx.clip();
-  balloonSim.internalBubbles.forEach((b) => {
-    const bx = cx + (b.ox + Math.sin(nowMs * 0.0018 * b.speed + b.phase) * 28) * scale;
-    const by = cy + (b.oy + Math.cos(nowMs * 0.0015 * b.speed + b.phase) * 28) * scale;
+  // 1. Render background + any burst metaball liquid splatter via WebGL2 Shader
+  const shaderMode =
+    state.balloonAlchemy === 'chrome' ? 3 : state.balloonAlchemy === 'biolume' ? 2 : 0;
+  shaderPipe.renderFluid(ctx, w, h, timeSec, shaderMode, activeMetaballs, []);
+
+  // 2. Composite the Three.js 3D Deformable PBR Balloon on top
+  studio3D.renderBalloon3D(ctx, w, h, timeSec, balloonSim, state.balloonAlchemy);
+
+  // 3. Expanding shockwave rings on burst
+  for (let i = balloonSim.shockwaves.length - 1; i >= 0; i--) {
+    const sw = balloonSim.shockwaves[i];
+    sw.r += 720 * dt;
+    sw.alpha -= dt * 1.55;
+    if (sw.alpha <= 0) {
+      balloonSim.shockwaves.splice(i, 1);
+      continue;
+    }
+    ctx.save();
     ctx.beginPath();
-    ctx.arc(bx, by, b.r * scale, 0, Math.PI * 2);
-    ctx.fillStyle =
+    ctx.arc(sw.x, sw.y, sw.r, 0, Math.PI * 2);
+    ctx.strokeStyle =
       state.balloonAlchemy === 'biolume'
-        ? 'rgba(94, 234, 212, 0.36)'
+        ? '#5eead4'
         : state.balloonAlchemy === 'chrome'
-        ? 'rgba(255, 255, 255, 0.28)'
-        : 'rgba(224, 242, 254, 0.25)';
-    ctx.fill();
-  });
+        ? '#f8fafc'
+        : '#7dd3fc';
+    ctx.globalAlpha = sw.alpha;
+    ctx.lineWidth = 4.5;
+    ctx.stroke();
+    ctx.restore();
+  }
 
-  // Glossy curved specular window highlight
-  ctx.beginPath();
-  ctx.ellipse(cx - 58 * scale, cy - 64 * scale, 46 * scale, 22 * scale, -0.55, 0, Math.PI * 2);
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.42)';
-  ctx.fill();
-  ctx.restore();
-
-  // Rim tension ring when squeezing
-  if (balloonSim.pressure > 0.04) {
+  // 4. Subtle hydrostatic pressure arc & tactile manipulation hint
+  if (balloonSim.pressure > 0.03) {
+    const cx = balloonSim.cx + balloonSim.offsetX * 75;
+    const cy = balloonSim.cy + balloonSim.offsetY * 75;
+    ctx.save();
     ctx.beginPath();
-    ctx.arc(
-      cx,
-      cy,
-      balloonSim.baseR * 1.18,
-      -Math.PI / 2,
-      -Math.PI / 2 + balloonSim.pressure * Math.PI * 2
-    );
-    ctx.strokeStyle = balloonSim.pressure > 0.75 ? '#fb7185' : pal.rim;
+    ctx.arc(cx, cy, 224, -Math.PI / 2, -Math.PI / 2 + balloonSim.pressure * Math.PI * 2);
+    ctx.strokeStyle = balloonSim.pressure > 0.74 ? '#fb7185' : 'rgba(125, 211, 252, 0.82)';
     ctx.lineWidth = 4.5;
     ctx.lineCap = 'round';
     ctx.stroke();
+    ctx.restore();
   }
 }
 
 /* ==========================================================================
-   2. POUR: REAL-TIME FLUID VESSEL CASCADE, ELIXIR MIX & ZERO-G GLOBES
+   2. POUR: WEBGL2 METABALL REFRACTIVE FLUID + GRAB-AND-TILT GLASS VESSELS
    ========================================================================== */
 
 const pourSim = {
   particles: [],
-  maxParticles: 240,
+  maxParticles: 155,
   pouring: false,
   spoutX: 360,
+  spoutAngle: 0,
   pointerX: 360,
-  pointerY: 160,
+  pointerY: 140,
   tiltX: 0,
+  pointers: new Map(), // pointerId -> { type: 'vessel'|'spout'|'zerog', vesselIdx, lastX, lastY, x, y }
   vessels: [
-    { x: 360, y: 290, w: 210, h: 105 }, // Top chalice
-    { x: 205, y: 515, w: 175, h: 120 }, // Left tumbler
-    { x: 515, y: 515, w: 175, h: 120 }  // Right tumbler
+    { x: 360, y: 295, homeX: 360, homeY: 295, w: 220, h: 112, angle: 0, vAngle: 0 }, // Top chalice
+    { x: 205, y: 535, homeX: 205, homeY: 535, w: 182, h: 126, angle: 0, vAngle: 0 }, // Left tumbler
+    { x: 515, y: 535, homeX: 515, homeY: 535, w: 182, h: 126, angle: 0, vAngle: 0 }  // Right tumbler
   ]
 };
 
-function spawnPourParticle(x, y, vx = 0, vy = 160) {
+function spawnPourParticle(x, y, vx = 0, vy = 160, hueOverride = null) {
   if (pourSim.particles.length >= pourSim.maxParticles) {
     pourSim.particles.shift();
   }
-  const isElixirB = state.pourMode === 'elixir' && Math.random() > 0.5;
+  const isSecondTone =
+    hueOverride !== null ? hueOverride : state.pourMode === 'elixir' ? (pourSim.particles.length % 2) : 0;
   pourSim.particles.push({
-    x: x + (Math.random() - 0.5) * 14,
+    x,
     y,
-    vx: vx + (Math.random() - 0.5) * 45,
-    vy: vy + Math.random() * 50,
-    r: state.pourMode === 'zerog' ? 14 + Math.random() * 10 : 9 + Math.random() * 4,
-    tone: isElixirB ? 'amber' : 'cyan'
+    vx: vx + (Math.random() - 0.5) * 36,
+    vy: vy + Math.random() * 35,
+    r: state.pourMode === 'zerog' ? 24 + Math.random() * 7 : 20.5,
+    hueShift: isSecondTone
   });
 }
 
@@ -738,145 +763,223 @@ function initPourStage() {
   const canvas = document.getElementById('pourCanvas');
   if (!canvas) return;
 
-  // Initial pre-filled cascade so vessels look alive immediately
-  for (let i = 0; i < 85; i++) {
-    const v = pourSim.vessels[i % 3];
-    spawnPourParticle(
-      v.x + (Math.random() - 0.5) * (v.w - 36),
-      v.y - Math.random() * 65,
-      (Math.random() - 0.5) * 20,
-      0
-    );
+  // Seed initial cohesive liquid pool in the vessels so it looks rich immediately
+  for (let i = 0; i < 48; i++) {
+    spawnPourParticle(285 + (i % 12) * 13, 305 + Math.floor(i / 12) * 11, 0, 0, i % 2);
   }
-
-  function updatePointer(e) {
-    const pt = toCanvasPos(canvas, e.clientX, e.clientY);
-    pourSim.pointerX = pt.x;
-    pourSim.pointerY = pt.y;
-    pourSim.spoutX = Math.max(110, Math.min(canvas.width - 110, pt.x));
-    pourSim.tiltX = ((pt.x - canvas.width / 2) / (canvas.width / 2)) * 95;
+  for (let i = 0; i < 28; i++) {
+    spawnPourParticle(145 + (i % 7) * 17, 555 + Math.floor(i / 7) * 11, 0, 0, 0);
+    spawnPourParticle(455 + (i % 7) * 17, 555 + Math.floor(i / 7) * 11, 0, 0, 1);
   }
 
   canvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
-    pourSim.pouring = true;
-    updatePointer(e);
+    audio.init();
+    const pt = toCanvasPos(canvas, e.clientX, e.clientY);
+    pourSim.pointerX = pt.x;
+    pourSim.pointerY = pt.y;
+
+    // Check if user grabbed one of the 3 glass vessels directly (when not in Zero-G)
+    let grabbedVessel = -1;
+    if (state.pourMode !== 'zerog') {
+      for (let i = 0; i < pourSim.vessels.length; i++) {
+        const v = pourSim.vessels[i];
+        if (Math.abs(pt.x - v.x) < v.w * 0.56 && Math.abs(pt.y - v.y) < v.h * 0.62) {
+          grabbedVessel = i;
+          break;
+        }
+      }
+    }
+
+    if (grabbedVessel >= 0) {
+      pourSim.pointers.set(e.pointerId, {
+        type: 'vessel',
+        vesselIdx: grabbedVessel,
+        startX: pt.x,
+        startY: pt.y,
+        lastX: pt.x,
+        lastY: pt.y,
+        x: pt.x,
+        y: pt.y
+      });
+      audio.vibrate(8);
+    } else if (state.pourMode === 'zerog') {
+      pourSim.pointers.set(e.pointerId, {
+        type: 'zerog',
+        lastX: pt.x,
+        lastY: pt.y,
+        x: pt.x,
+        y: pt.y
+      });
+      pourSim.pouring = true;
+    } else {
+      pourSim.pointers.set(e.pointerId, {
+        type: 'spout',
+        lastX: pt.x,
+        lastY: pt.y,
+        x: pt.x,
+        y: pt.y
+      });
+      pourSim.pouring = true;
+      pourSim.spoutX = Math.max(95, Math.min(canvas.width - 95, pt.x));
+    }
     recordInteraction(1);
   });
 
   canvas.addEventListener('pointermove', (e) => {
-    if (!pourSim.pouring) return;
-    updatePointer(e);
+    const rec = pourSim.pointers.get(e.pointerId);
+    if (!rec) return;
+    const pt = toCanvasPos(canvas, e.clientX, e.clientY);
+    const dx = pt.x - rec.lastX;
+    const dy = pt.y - rec.lastY;
+    rec.lastX = rec.x;
+    rec.lastY = rec.y;
+    rec.x = pt.x;
+    rec.y = pt.y;
+    pourSim.pointerX = pt.x;
+    pourSim.pointerY = pt.y;
+
+    if (rec.type === 'vessel') {
+      const v = pourSim.vessels[rec.vesselIdx];
+      // Move vessel slightly and tilt it generously so user can pour from cup to cup!
+      v.x = v.homeX + Math.max(-110, Math.min(110, (pt.x - rec.startX) * 0.65));
+      v.y = v.homeY + Math.max(-85, Math.min(85, (pt.y - rec.startY) * 0.55));
+      const targetAngle = Math.max(-1.85, Math.min(1.85, (pt.x - rec.startX) * 0.011));
+      v.angle = targetAngle;
+
+      // Impart slosh + pour impulse to particles inside this vessel
+      pourSim.particles.forEach((p) => {
+        if (Math.hypot(p.x - v.x, p.y - v.y) < v.w * 0.65) {
+          p.vx += dx * 4.2 + Math.sin(v.angle) * 25;
+          p.vy += dy * 2.8 - Math.abs(Math.sin(v.angle)) * 14;
+        }
+      });
+    } else if (rec.type === 'spout') {
+      pourSim.spoutX = Math.max(95, Math.min(canvas.width - 95, pt.x));
+      pourSim.spoutAngle = Math.max(-0.55, Math.min(0.55, dx * 0.025));
+      pourSim.tiltX = Math.max(-180, Math.min(180, dx * 6.5));
+    } else if (rec.type === 'zerog') {
+      // Grab, stretch, or slice floating zero-G liquid blobs
+      pourSim.particles.forEach((p) => {
+        const d = Math.hypot(p.x - pt.x, p.y - pt.y);
+        if (d < 135) {
+          p.vx += dx * 9.5;
+          p.vy += dy * 9.5;
+        }
+      });
+    }
   });
 
-  const stopPour = () => {
-    pourSim.pouring = false;
-    pourSim.tiltX = 0;
-    audio.stopPourStream();
+  const stopPour = (e) => {
+    pourSim.pointers.delete(e.pointerId);
+    let anySpout = false;
+    for (const r of pourSim.pointers.values()) {
+      if (r.type === 'spout' || r.type === 'zerog') anySpout = true;
+    }
+    if (!anySpout) {
+      pourSim.pouring = false;
+      audio.stopPourStream();
+    }
   };
   canvas.addEventListener('pointerup', stopPour);
   canvas.addEventListener('pointercancel', stopPour);
 
-  document.querySelectorAll('[data-pour]').forEach((btn) => {
+  document.querySelectorAll('#panel-pour .quiet-pill').forEach((btn) => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('[data-pour]').forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('#panel-pour .quiet-pill').forEach((b) =>
+        b.classList.remove('active')
+      );
       btn.classList.add('active');
       state.pourMode = btn.dataset.pour || 'water';
       audio.vibrate(7);
     });
   });
 
-  const drainBtn = document.getElementById('drainFluidBtn');
-  if (drainBtn) {
-    drainBtn.addEventListener('click', () => {
-      state.drainOpen = true;
-      state.drainTimer = 2.4;
-      audio.playDrainVortex();
-      recordInteraction(1);
-    });
-  }
+  document.getElementById('drainFluidBtn')?.addEventListener('click', () => {
+    audio.init();
+    state.drainOpen = true;
+    state.drainTimer = 2.4;
+    audio.playDrainVortex();
+    recordInteraction(1);
+  });
 }
 
 function renderPourFrame(dt, nowMs) {
+  if (state.activeTab !== 'pour') return;
   const canvas = document.getElementById('pourCanvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const w = canvas.width;
   const h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
+  const timeSec = nowMs * 0.001;
+
+  // Spring ungrabbed vessels smoothly back to their home mounts
+  const grabbedSet = new Set();
+  for (const r of pourSim.pointers.values()) {
+    if (r.type === 'vessel') grabbedSet.add(r.vesselIdx);
+  }
+  pourSim.vessels.forEach((v, idx) => {
+    if (!grabbedSet.has(idx)) {
+      v.x += (v.homeX - v.x) * Math.min(1, dt * 8);
+      v.y += (v.homeY - v.y) * Math.min(1, dt * 8);
+      v.angle += (0 - v.angle) * Math.min(1, dt * 7);
+    }
+  });
+
+  // Spawn active pouring stream when holding spout
+  if (pourSim.pouring) {
+    const streamSpeed = 240;
+    const vx = Math.sin(pourSim.spoutAngle) * streamSpeed;
+    const vy = Math.cos(pourSim.spoutAngle) * streamSpeed;
+    for (let k = 0; k < 2; k++) {
+      spawnPourParticle(
+        pourSim.spoutX + (Math.random() - 0.5) * 10,
+        state.pourMode === 'zerog' ? pourSim.pointerY : 78,
+        vx,
+        state.pourMode === 'zerog' ? (Math.random() - 0.5) * 90 : vy
+      );
+    }
+    const fillNorm = Math.min(1, pourSim.particles.length / pourSim.maxParticles);
+    audio.updatePourStream(0.85, fillNorm);
+  }
 
   if (state.drainOpen) {
     state.drainTimer -= dt;
-    if (state.drainTimer <= 0 || pourSim.particles.length === 0) {
-      state.drainOpen = false;
-    }
+    if (state.drainTimer <= 0) state.drainOpen = false;
   }
 
-  if (pourSim.pouring && state.activeTab === 'pour') {
-    for (let k = 0; k < 3; k++) {
-      spawnPourParticle(pourSim.spoutX, 68, (Math.random() - 0.5) * 35, 220);
-    }
-    const fillNorm = Math.min(1, pourSim.particles.length / pourSim.maxParticles);
-    audio.updatePourStream(0.8, fillNorm);
-  }
+  pourSim.tiltX *= Math.pow(0.08, dt);
+  pourSim.spoutAngle *= Math.pow(0.1, dt);
 
-  // Draw top machined pouring nozzle + active stream ribbon
-  ctx.save();
-  ctx.fillStyle = '#334155';
-  ctx.beginPath();
-  ctx.roundRect(pourSim.spoutX - 28, 18, 56, 36, 12);
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
+  const P = pourSim.particles;
+  const isZeroG = state.pourMode === 'zerog';
+  const activeVessels = isZeroG ? [] : pourSim.vessels;
 
-  if (pourSim.pouring) {
-    const streamGrad = ctx.createLinearGradient(pourSim.spoutX, 54, pourSim.spoutX, 280);
-    streamGrad.addColorStop(0, state.pourMode === 'elixir' ? '#f43f5e' : '#7dd3fc');
-    streamGrad.addColorStop(1, 'rgba(56, 189, 248, 0.08)');
-    ctx.fillStyle = streamGrad;
-    ctx.beginPath();
-    ctx.roundRect(pourSim.spoutX - 9, 52, 18, 220, 9);
-    ctx.fill();
-  }
-  ctx.restore();
-
-  // Physics step for fluid particles
-  const N = pourSim.particles.length;
-  const zeroG = state.pourMode === 'zerog';
-
-  for (let i = N - 1; i >= 0; i--) {
-    const p = pourSim.particles[i];
-    if (zeroG) {
-      p.vx += Math.sin(nowMs * 0.002 + i) * 18 * dt;
-      p.vy += Math.cos(nowMs * 0.002 + i * 1.3) * 18 * dt;
-      if (pourSim.pouring) {
-        const dx = p.x - pourSim.pointerX;
-        const dy = p.y - pourSim.pointerY;
-        const d = Math.hypot(dx, dy) || 1;
-        if (d < 160) {
-          p.vx += (dx / d) * 320 * dt;
-          p.vy += (dy / d) * 320 * dt;
-        }
-      }
+  // Integrate SPH / Metaball particle dynamics + tilted vessel wall collisions
+  for (let i = P.length - 1; i >= 0; i--) {
+    const p = P[i];
+    if (isZeroG) {
+      // Zero-G surface tension attraction toward nearby globes
+      p.vx += (w * 0.5 - p.x) * 0.14 * dt;
+      p.vy += (h * 0.5 - p.y) * 0.14 * dt;
       p.vx *= 0.992;
       p.vy *= 0.992;
     } else {
       p.vy += 690 * dt;
       p.vx += pourSim.tiltX * dt;
-      p.vx *= 0.985;
-      p.vy *= 0.985;
+      p.vx *= 0.99;
+      p.vy *= 0.99;
     }
 
-    // Drain vortex pull
     if (state.drainOpen) {
-      const dx = 360 - p.x;
-      const dy = 785 - p.y;
-      p.vx += dx * 4.5 * dt;
-      p.vy += (dy * 5.2 + 260) * dt;
-      if (p.y > 760 && Math.abs(p.x - 360) < 68) {
-        pourSim.particles.splice(i, 1);
+      const dx = w * 0.5 - p.x;
+      const dy = h - 24 - p.y;
+      const dist = Math.hypot(dx, dy) + 1;
+      p.vx += (dx / dist) * 1050 * dt - (dy / dist) * 320 * dt;
+      p.vy += (dy / dist) * 1250 * dt;
+      if (p.y > h - 52 && Math.abs(p.x - w * 0.5) < 95) {
+        P.splice(i, 1);
         continue;
       }
     }
@@ -884,209 +987,293 @@ function renderPourFrame(dt, nowMs) {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
 
-    // Pairwise soft repulsion so liquid fills cups volumetrically
-    for (let j = Math.max(0, i - 18); j < i; j++) {
-      const q = pourSim.particles[j];
-      if (!q) continue;
-      const dx = p.x - q.x;
-      const dy = p.y - q.y;
-      const minD = (p.r + q.r) * 0.92;
-      const d2 = dx * dx + dy * dy;
-      if (d2 > 0.01 && d2 < minD * minD) {
-        const d = Math.sqrt(d2);
-        const overlap = (minD - d) * 0.48;
-        const nx = dx / d;
-        const ny = dy / d;
-        p.x += nx * overlap;
-        p.y += ny * overlap;
-        q.x -= nx * overlap;
-        q.y -= ny * overlap;
-        const vAvgX = (p.vx + q.vx) * 0.5;
-        const vAvgY = (p.vy + q.vy) * 0.5;
-        p.vx = p.vx * 0.7 + vAvgX * 0.3;
-        p.vy = p.vy * 0.7 + vAvgY * 0.3;
-      }
-    }
+    // Collide with tilted borosilicate glass vessels (transform into vessel local coords!)
+    if (!isZeroG) {
+      for (let vIdx = 0; vIdx < activeVessels.length; vIdx++) {
+        const v = activeVessels[vIdx];
+        const dx = p.x - v.x;
+        const dy = p.y - v.y;
+        const c = Math.cos(-v.angle);
+        const s = Math.sin(-v.angle);
+        let lx = c * dx - s * dy;
+        let ly = s * dx + c * dy;
 
-    // Collide with the 3 sculpted glass vessels (unless Zero-G or draining)
-    if (!zeroG && !state.drainOpen) {
-      for (const v of pourSim.vessels) {
-        const left = v.x - v.w / 2;
-        const right = v.x + v.w / 2;
-        const top = v.y - v.h;
-        const bot = v.y;
+        const hw = v.w * 0.5 - 10;
+        const hh = v.h * 0.5 - 10;
 
-        if (p.y + p.r > top && p.y - p.r < bot + 14) {
-          // Floor of cup
-          if (p.x > left + 8 && p.x < right - 8 && p.y + p.r > bot - 8 && p.y < bot + 14 && p.vy > 0) {
-            p.y = bot - 8 - p.r;
+        if (Math.abs(lx) < hw + 12 && Math.abs(ly) < hh + 12) {
+          // Floor of the cup
+          if (ly > hh - 10 && ly < hh + 14 && Math.abs(lx) < hw) {
+            ly = hh - 10;
+            // Convert local normal impulse back to world velocity
             p.vy *= -0.25;
-            p.vx += (Math.random() - 0.5) * 18;
+            p.vx += Math.sin(v.angle) * 240 * dt;
           }
-          // Left wall
-          if (Math.abs(p.x - left) < p.r + 6 && p.y > top + 6) {
-            p.x = p.x < left ? left - p.r - 6 : left + p.r + 6;
-            p.vx *= -0.45;
+          // Left and right glass walls (open at top ly < -hh + 8 so tilted cups pour out!)
+          if (ly > -hh + 8 && ly < hh) {
+            if (lx < -hw + 10 && lx > -hw - 12) {
+              lx = -hw + 10;
+              p.vx *= -0.4;
+            } else if (lx > hw - 10 && lx < hw + 12) {
+              lx = hw - 10;
+              p.vx *= -0.4;
+            }
           }
-          // Right wall
-          if (Math.abs(p.x - right) < p.r + 6 && p.y > top + 6) {
-            p.x = p.x < right ? right - p.r - 6 : right + p.r + 6;
-            p.vx *= -0.45;
-          }
+          const wc = Math.cos(v.angle);
+          const ws = Math.sin(v.angle);
+          p.x = v.x + (wc * lx - ws * ly);
+          p.y = v.y + (ws * lx + wc * ly);
         }
       }
     }
 
-    // Chamber outer walls & floor basin
-    if (p.x < p.r + 22) { p.x = p.r + 22; p.vx *= -0.55; }
-    if (p.x > w - p.r - 22) { p.x = w - p.r - 22; p.vx *= -0.55; }
-    if (p.y < p.r + 50) { p.y = p.r + 50; p.vy *= -0.55; }
-    if (p.y > h - p.r - 26) {
-      p.y = h - p.r - 26;
-      p.vy *= -0.3;
+    // Chamber boundaries
+    if (p.x < 34) {
+      p.x = 34;
+      p.vx = Math.abs(p.vx) * 0.55;
+    } else if (p.x > w - 34) {
+      p.x = w - 34;
+      p.vx = -Math.abs(p.vx) * 0.55;
+    }
+    if (p.y < 34) {
+      p.y = 34;
+      p.vy = Math.abs(p.vy) * 0.55;
+    } else if (p.y > h - 38) {
+      p.y = h - 38;
+      p.vy *= -0.32;
+      p.vx *= 0.92;
     }
   }
 
-  // Render glowing fluid metaball particles
-  pourSim.particles.forEach((p) => {
-    const g = ctx.createRadialGradient(p.x - p.r * 0.25, p.y - p.r * 0.25, 1, p.x, p.y, p.r * 1.45);
-    if (state.pourMode === 'elixir' && p.tone === 'amber') {
-      g.addColorStop(0, '#fde68a');
-      g.addColorStop(0.55, '#f43f5e');
-      g.addColorStop(1, 'rgba(244, 63, 94, 0)');
-    } else if (state.pourMode === 'zerog') {
-      g.addColorStop(0, '#ccfbf1');
-      g.addColorStop(0.55, '#2dd4bf');
-      g.addColorStop(1, 'rgba(45, 212, 191, 0)');
-    } else {
-      g.addColorStop(0, '#e0f2fe');
-      g.addColorStop(0.55, '#38bdf8');
-      g.addColorStop(1, 'rgba(2, 132, 199, 0)');
+  // Pairwise SPH pressure repulsion + Zero-G surface tension cohesion
+  const targetSpacing = isZeroG ? 24 : 21;
+  for (let i = 0; i < P.length; i++) {
+    const a = P[i];
+    for (let j = i + 1; j < P.length; j++) {
+      const b = P[j];
+      const dx = b.x - a.x;
+      const dy = b.y - a.y;
+      if (Math.abs(dx) > 42 || Math.abs(dy) > 42) continue;
+      const d = Math.hypot(dx, dy) || 0.01;
+      if (d < targetSpacing) {
+        const overlap = (targetSpacing - d) * 0.38;
+        const nx = dx / d;
+        const ny = dy / d;
+        a.x -= nx * overlap;
+        a.y -= ny * overlap;
+        b.x += nx * overlap;
+        b.y += ny * overlap;
+        const avgVx = (a.vx + b.vx) * 0.5;
+        const avgVy = (a.vy + b.vy) * 0.5;
+        a.vx = a.vx * 0.82 + avgVx * 0.18;
+        a.vy = a.vy * 0.82 + avgVy * 0.18;
+        b.vx = b.vx * 0.82 + avgVx * 0.18;
+        b.vy = b.vy * 0.82 + avgVy * 0.18;
+      } else if (isZeroG && d < 42) {
+        // Surface tension pull so Zero-G blobs coalesce into smooth spheres
+        const pull = (42 - d) * 0.35 * dt;
+        a.vx += (dx / d) * pull * 18;
+        a.vy += (dy / d) * pull * 18;
+        b.vx -= (dx / d) * pull * 18;
+        b.vy -= (dy / d) * pull * 18;
+      }
     }
+  }
+
+  // Render smooth refractive Metaball liquid + tilted borosilicate glass vessels via WebGL2 shader!
+  const modeInt = state.pourMode === 'elixir' ? 1 : state.pourMode === 'zerog' ? 2 : 0;
+  shaderPipe.renderFluid(ctx, w, h, timeSec, modeInt, P, activeVessels);
+
+  // Draw top machined pouring nozzle / spout
+  if (!isZeroG) {
+    ctx.save();
+    ctx.translate(pourSim.spoutX, 44);
+    ctx.rotate(pourSim.spoutAngle);
+    const spoutGrad = ctx.createLinearGradient(-28, -20, 28, 20);
+    spoutGrad.addColorStop(0, '#334155');
+    spoutGrad.addColorStop(0.5, '#94a3b8');
+    spoutGrad.addColorStop(1, '#1e293b');
+    ctx.fillStyle = spoutGrad;
     ctx.beginPath();
-    ctx.arc(p.x, p.y, p.r * 1.42, 0, Math.PI * 2);
-    ctx.fillStyle = g;
+    ctx.roundRect(-26, -24, 52, 42, 12);
     ctx.fill();
-  });
+    ctx.strokeStyle = 'rgba(255,255,255,0.35)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+  }
 
-  // Render refractive glass chalices & tumblers over fluid
-  if (!zeroG) {
-    pourSim.vessels.forEach((v) => {
-      const left = v.x - v.w / 2;
-      const right = v.x + v.w / 2;
-      const top = v.y - v.h;
-      const bot = v.y;
-
+  // Highlight rim & tilt handle on any grabbed glass vessel
+  for (const r of pourSim.pointers.values()) {
+    if (r.type === 'vessel') {
+      const v = pourSim.vessels[r.vesselIdx];
       ctx.save();
+      ctx.translate(v.x, v.y);
+      ctx.rotate(v.angle);
+      ctx.strokeStyle = 'rgba(125, 211, 252, 0.75)';
+      ctx.lineWidth = 3;
       ctx.beginPath();
-      ctx.moveTo(left, top);
-      ctx.lineTo(left + 10, bot - 16);
-      ctx.quadraticCurveTo(left + 12, bot, left + 28, bot);
-      ctx.lineTo(right - 28, bot);
-      ctx.quadraticCurveTo(right - 12, bot, right - 10, bot - 16);
-      ctx.lineTo(right, top);
-      ctx.strokeStyle = 'rgba(226, 232, 240, 0.42)';
-      ctx.lineWidth = 4.5;
-      ctx.lineCap = 'round';
-      ctx.stroke();
-
-      // Subtle glass specular streak
-      ctx.beginPath();
-      ctx.moveTo(left + 14, top + 12);
-      ctx.lineTo(left + 21, bot - 18);
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.18)';
-      ctx.lineWidth = 2.5;
+      ctx.roundRect(-v.w * 0.5, -v.h * 0.5, v.w, v.h, 18);
       ctx.stroke();
       ctx.restore();
-    });
+    }
   }
 
-  // Vortex drain indicator at bottom center
+  // Bottom vortex drain indicator when open
   if (state.drainOpen) {
     ctx.save();
-    ctx.translate(360, 775);
-    ctx.rotate(nowMs * 0.014);
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 3;
-    for (let k = 0; k < 3; k++) {
-      ctx.beginPath();
-      ctx.arc(0, 0, 18 + k * 14, k, k + Math.PI * 1.25);
-      ctx.stroke();
-    }
+    const dg = ctx.createRadialGradient(w * 0.5, h - 22, 4, w * 0.5, h - 22, 95);
+    dg.addColorStop(0, 'rgba(56, 189, 248, 0.9)');
+    dg.addColorStop(1, 'rgba(56, 189, 248, 0)');
+    ctx.fillStyle = dg;
+    ctx.beginPath();
+    ctx.arc(w * 0.5, h - 22, 95, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 }
 
 /* ==========================================================================
-   3. BEADS: ABACUS RAILS, SQUISHY GEL PIT & MAGNETIC ORBIT LOOM
+   3. BEADS: PHOTOREALISTIC 3D SPHERES + MULTI-FINGER GRAB, SQUISH & ORBIT
    ========================================================================== */
 
 const beadsSim = {
-  rails: [],
-  gelBeads: [],
-  orbitNodes: [],
-  draggingRailBead: null,
+  pointers: new Map(), // pointerId -> { x, y, lastX, lastY, grabbedBead, railIdx }
   pointerActive: false,
   pointerX: 360,
   pointerY: 410,
-  lastPointerX: 360,
-  lastPointerY: 410,
-  lastClackMs: 0
+  lastVx: 0,
+  lastVy: 0,
+  railTilt: 0,
+  rails: [],
+  gelBeads: [],
+  gelDrops: [],
+  orbitNodes: [],
+  lastClackMs: 0,
+  sphereSprites: {}
 };
+
+// Pre-render ultra-crisp raytraced-look 3D PBR sphere textures for instant 60fps shading
+function buildBeadSprites() {
+  const specs = [
+    { key: '#38bdf8', core: '#38bdf8', deep: '#0369a1', rim: '#bae6fd', metal: false },
+    { key: '#f8fafc', core: '#e2e8f0', deep: '#334155', rim: '#ffffff', metal: true },
+    { key: '#f59e0b', core: '#f59e0b', deep: '#78350f', rim: '#fde68a', metal: true },
+    { key: '#34d399', core: '#10b981', deep: '#064e3b', rim: '#a7f3d0', metal: false },
+    { key: '#a855f7', core: '#9333ea', deep: '#3b0764', rim: '#e9d5ff', metal: false }
+  ];
+
+  specs.forEach((sp) => {
+    const sz = 128;
+    const c = document.createElement('canvas');
+    c.width = sz;
+    c.height = sz;
+    const gctx = c.getContext('2d');
+    const cx = sz / 2;
+    const cy = sz / 2;
+    const r = 56;
+
+    // 1. Base 3D PBR body gradient
+    const body = gctx.createRadialGradient(cx - 18, cy - 22, 4, cx, cy, r);
+    body.addColorStop(0, sp.rim);
+    body.addColorStop(0.32, sp.core);
+    body.addColorStop(0.78, sp.deep);
+    body.addColorStop(1, '#04070d');
+    gctx.beginPath();
+    gctx.arc(cx, cy, r, 0, Math.PI * 2);
+    gctx.fillStyle = body;
+    gctx.fill();
+
+    // 2. Internal subsurface caustic focal glow on bottom-right hemisphere
+    const caustic = gctx.createRadialGradient(cx + 18, cy + 20, 2, cx + 14, cy + 16, 26);
+    caustic.addColorStop(0, sp.rim);
+    caustic.addColorStop(1, 'rgba(255,255,255,0)');
+    gctx.globalAlpha = sp.metal ? 0.35 : 0.55;
+    gctx.beginPath();
+    gctx.arc(cx, cy, r, 0, Math.PI * 2);
+    gctx.fillStyle = caustic;
+    gctx.fill();
+    gctx.globalAlpha = 1;
+
+    // 3. Crisp studio softbox reflection window on upper-left
+    gctx.save();
+    gctx.translate(cx - 19, cy - 21);
+    gctx.rotate(-0.62);
+    const specGrad = gctx.createLinearGradient(0, -12, 0, 12);
+    specGrad.addColorStop(0, 'rgba(255, 255, 255, 0.95)');
+    specGrad.addColorStop(1, 'rgba(255, 255, 255, 0.08)');
+    gctx.fillStyle = specGrad;
+    gctx.beginPath();
+    gctx.ellipse(0, 0, 18, 9.5, 0, 0, Math.PI * 2);
+    gctx.fill();
+    gctx.restore();
+
+    // 4. Fresnel outer rim sheen
+    gctx.strokeStyle = sp.rim;
+    gctx.globalAlpha = 0.42;
+    gctx.lineWidth = 2.2;
+    gctx.beginPath();
+    gctx.arc(cx, cy, r - 1.2, 0, Math.PI * 2);
+    gctx.stroke();
+
+    beadsSim.sphereSprites[sp.key] = c;
+  });
+}
 
 function initBeadsStage() {
   const canvas = document.getElementById('beadsCanvas');
   if (!canvas) return;
 
-  // 1. 4 Abacus Rails with 6 heavy beads each
-  const railYs = [175, 330, 485, 640];
-  const finishes = ['#38bdf8', '#f59e0b', '#34d399', '#e2e8f0'];
-  railYs.forEach((ry, rIdx) => {
+  buildBeadSprites();
+
+  // 1. Abacus Track: 4 sculpted chrome rails with 6 beads per rail
+  const railYs = [185, 335, 485, 635];
+  const railColors = ['#38bdf8', '#f8fafc', '#f59e0b', '#34d399'];
+  beadsSim.rails = railYs.map((ry, rIdx) => {
     const beads = [];
     for (let i = 0; i < 6; i++) {
       beads.push({
-        x: 115 + i * 64 + (i >= 3 ? 115 : 0),
+        x: 135 + i * 76 + (rIdx % 2) * 28,
         vx: 0,
-        r: 27,
-        color: finishes[(rIdx + i) % finishes.length],
+        r: 30,
+        color: railColors[(rIdx + i) % railColors.length],
         id: rIdx * 6 + i
       });
     }
-    beadsSim.rails.push({ y: ry, beads });
+    return { y: ry, beads };
   });
 
-  // 2. 84 Squishy Hydrogel Orbeez Beads
-  const gelColors = ['#38bdf8', '#2dd4bf', '#818cf8', '#f472b6', '#fbbf24'];
-  for (let i = 0; i < 84; i++) {
+  // 2. Squishy Translucent Gel Bead Pit (96 Orbeez spheres)
+  const gelPalette = ['#38bdf8', '#34d399', '#a855f7', '#f59e0b'];
+  for (let i = 0; i < 96; i++) {
     beadsSim.gelBeads.push({
-      x: 80 + (i % 9) * 68 + (Math.random() - 0.5) * 15,
-      y: 140 + Math.floor(i / 9) * 66,
+      x: 90 + (i % 10) * 58 + (Math.random() - 0.5) * 14,
+      y: 170 + Math.floor(i / 10) * 58 + (Math.random() - 0.5) * 14,
       vx: 0,
       vy: 0,
-      r: 26 + (i % 3) * 3,
+      r: 25 + (i % 3) * 3.5,
       squish: 0,
-      color: gelColors[i % gelColors.length],
+      squishAngle: 0,
+      color: gelPalette[i % gelPalette.length],
       id: i
     });
   }
 
-  // 3. 18 Magnetic Orbit Constellation Nodes
+  // 3. Magnetic Orbit Loom (18 magnetic spheres around a central core)
   for (let i = 0; i < 18; i++) {
-    const ring = i < 6 ? 1 : 2;
-    const countInRing = i < 6 ? 6 : 12;
-    const idxInRing = i < 6 ? i : i - 6;
-    const a = (idxInRing / countInRing) * Math.PI * 2;
-    const rad = ring === 1 ? 130 : 250;
-    const ax = 360 + Math.cos(a) * rad;
-    const ay = 410 + Math.sin(a) * rad;
+    const ang = (i / 18) * Math.PI * 2;
+    const rad = i % 2 === 0 ? 145 : 240;
+    const ax = 360 + Math.cos(ang) * rad;
+    const ay = 410 + Math.sin(ang) * rad;
     beadsSim.orbitNodes.push({
-      ax,
-      ay,
       x: ax,
       y: ay,
+      anchorX: ax,
+      anchorY: ay,
       vx: 0,
       vy: 0,
-      r: ring === 1 ? 18 : 14,
+      r: i % 2 === 0 ? 22 : 18,
+      color: railColors[i % railColors.length],
       id: i
     });
   }
@@ -1094,113 +1281,224 @@ function initBeadsStage() {
   canvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
+    audio.init();
     const pt = toCanvasPos(canvas, e.clientX, e.clientY);
     beadsSim.pointerActive = true;
     beadsSim.pointerX = pt.x;
     beadsSim.pointerY = pt.y;
-    beadsSim.lastPointerX = pt.x;
-    beadsSim.lastPointerY = pt.y;
+
+    const pRec = {
+      x: pt.x,
+      y: pt.y,
+      lastX: pt.x,
+      lastY: pt.y,
+      grabbedBead: null,
+      grabbedOrbit: null
+    };
 
     if (state.beadsMode === 'track') {
-      let best = null;
-      let bestDist = 65;
+      // Find nearest bead on any rail to grab directly
+      let bestDist = 56;
       beadsSim.rails.forEach((rail) => {
         rail.beads.forEach((b) => {
           const d = Math.hypot(pt.x - b.x, pt.y - rail.y);
           if (d < bestDist) {
             bestDist = d;
-            best = b;
+            pRec.grabbedBead = b;
           }
         });
       });
-      beadsSim.draggingRailBead = best;
+    } else if (state.beadsMode === 'gel') {
+      // If user pinches with 2nd finger or double-presses directly on a gel bead, squish/pop it!
+      if (beadsSim.pointers.size >= 1) {
+        for (let i = 0; i < beadsSim.gelBeads.length; i++) {
+          const gb = beadsSim.gelBeads[i];
+          if (Math.hypot(pt.x - gb.x, pt.y - gb.y) < gb.r * 1.35) {
+            gb.squish = 0.55;
+            audio.playBeadCollision(0.9, 'gel', gb.id);
+            for (let k = 0; k < 8; k++) {
+              const a = (k / 8) * Math.PI * 2;
+              beadsSim.gelDrops.push({
+                x: gb.x,
+                y: gb.y,
+                vx: Math.cos(a) * 220,
+                vy: Math.sin(a) * 220,
+                r: 7,
+                color: gb.color,
+                life: 1.0
+              });
+            }
+            break;
+          }
+        }
+      }
+    } else if (state.beadsMode === 'orbit') {
+      let bestDist = 52;
+      beadsSim.orbitNodes.forEach((n) => {
+        const d = Math.hypot(pt.x - n.x, pt.y - n.y);
+        if (d < bestDist) {
+          bestDist = d;
+          pRec.grabbedOrbit = n;
+        }
+      });
     }
+
+    beadsSim.pointers.set(e.pointerId, pRec);
     recordInteraction(1);
   });
 
   canvas.addEventListener('pointermove', (e) => {
-    if (!beadsSim.pointerActive) return;
+    const rec = beadsSim.pointers.get(e.pointerId);
+    if (!rec) return;
     const pt = toCanvasPos(canvas, e.clientX, e.clientY);
-    const dx = pt.x - beadsSim.lastPointerX;
+    const dx = pt.x - rec.lastX;
+    const dy = pt.y - rec.lastY;
+    rec.lastX = rec.x;
+    rec.lastY = rec.y;
+    rec.x = pt.x;
+    rec.y = pt.y;
     beadsSim.pointerX = pt.x;
     beadsSim.pointerY = pt.y;
+    beadsSim.lastVx = dx * 32;
+    beadsSim.lastVy = dy * 32;
 
-    if (state.beadsMode === 'track' && beadsSim.draggingRailBead) {
-      beadsSim.draggingRailBead.vx = dx * 26;
-      beadsSim.draggingRailBead.x = Math.max(76, Math.min(canvas.width - 76, pt.x));
+    if (rec.grabbedBead) {
+      rec.grabbedBead.vx = (pt.x - rec.grabbedBead.x) * 28;
+      rec.grabbedBead.x = Math.max(85, Math.min(canvas.width - 85, pt.x));
+    } else if (state.beadsMode === 'track') {
+      beadsSim.railTilt = Math.max(-0.35, Math.min(0.35, (pt.x - 360) / 700));
     }
-    beadsSim.lastPointerX = pt.x;
-    beadsSim.lastPointerY = pt.y;
+
+    if (rec.grabbedOrbit) {
+      rec.grabbedOrbit.x = pt.x;
+      rec.grabbedOrbit.y = pt.y;
+      rec.grabbedOrbit.vx = dx * 28;
+      rec.grabbedOrbit.vy = dy * 28;
+    }
   });
 
-  const endBeadTouch = () => {
-    beadsSim.pointerActive = false;
-    beadsSim.draggingRailBead = null;
+  const endBeadsPointer = (e) => {
+    beadsSim.pointers.delete(e.pointerId);
+    if (beadsSim.pointers.size === 0) {
+      beadsSim.pointerActive = false;
+    }
   };
-  canvas.addEventListener('pointerup', endBeadTouch);
-  canvas.addEventListener('pointercancel', endBeadTouch);
+  canvas.addEventListener('pointerup', endBeadsPointer);
+  canvas.addEventListener('pointercancel', endBeadsPointer);
 
-  document.querySelectorAll('[data-beads]').forEach((btn) => {
+  document.querySelectorAll('#panel-beads .quiet-pill').forEach((btn) => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('[data-beads]').forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('#panel-beads .quiet-pill').forEach((b) =>
+        b.classList.remove('active')
+      );
       btn.classList.add('active');
       state.beadsMode = btn.dataset.beads || 'track';
       audio.vibrate(7);
     });
   });
+
+  document.getElementById('shuffleBeadsBtn')?.addEventListener('click', () => {
+    audio.init();
+    if (state.beadsMode === 'track') {
+      beadsSim.rails.forEach((r, idx) => {
+        const target = r.beads[idx % 2 === 0 ? 0 : r.beads.length - 1];
+        target.vx += idx % 2 === 0 ? 780 : -780;
+      });
+      audio.playBeadCollision(0.95, 'track', 2);
+    } else if (state.beadsMode === 'gel') {
+      beadsSim.gelBeads.forEach((b) => {
+        b.vy -= 260 + Math.random() * 280;
+        b.vx += (Math.random() - 0.5) * 340;
+        b.squish = 0.28;
+      });
+      audio.playBeadCollision(0.85, 'gel', 4);
+    } else {
+      beadsSim.orbitNodes.forEach((n, i) => {
+        const ang = (i / beadsSim.orbitNodes.length) * Math.PI * 2 + 0.5;
+        n.vx += Math.cos(ang) * 460;
+        n.vy += Math.sin(ang) * 460;
+      });
+      audio.playBeadCollision(0.9, 'orbit', 6);
+    }
+    recordInteraction(1);
+  });
 }
 
 function renderBeadsFrame(dt, nowMs) {
+  if (state.activeTab !== 'beads') return;
   const canvas = document.getElementById('beadsCanvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const w = canvas.width;
   const h = canvas.height;
+
   ctx.clearRect(0, 0, w, h);
 
+  // Studio dark anodized slate backdrop
+  const bg = ctx.createRadialGradient(w * 0.5, h * 0.3, 40, w * 0.5, h * 0.5, 520);
+  bg.addColorStop(0, '#162032');
+  bg.addColorStop(1, '#070b12');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
+
+  const ptrList = Array.from(beadsSim.pointers.values());
+  if (beadsSim.pointerActive && ptrList.length === 0) {
+    ptrList.push({ x: beadsSim.pointerX, y: beadsSim.pointerY });
+  }
+
   if (state.beadsMode === 'track') {
-    const minX = 76;
-    const maxX = w - 76;
+    beadsSim.railTilt *= Math.pow(0.15, dt);
 
     beadsSim.rails.forEach((rail) => {
-      // Brushed metallic rod
-      const rodGrad = ctx.createLinearGradient(0, rail.y - 6, 0, rail.y + 6);
-      rodGrad.addColorStop(0, '#94a3b8');
-      rodGrad.addColorStop(0.5, '#334155');
+      // 3D Cylindrical Chrome Rod with studio highlight & drop shadow
+      ctx.save();
+      ctx.shadowColor = 'rgba(0,0,0,0.85)';
+      ctx.shadowBlur = 16;
+      ctx.shadowOffsetY = 10;
+      const rodGrad = ctx.createLinearGradient(0, rail.y - 8, 0, rail.y + 8);
+      rodGrad.addColorStop(0, '#475569');
+      rodGrad.addColorStop(0.35, '#f8fafc');
+      rodGrad.addColorStop(0.7, '#1e293b');
       rodGrad.addColorStop(1, '#0f172a');
       ctx.fillStyle = rodGrad;
       ctx.beginPath();
-      ctx.roundRect(48, rail.y - 6, w - 96, 12, 6);
+      ctx.roundRect(56, rail.y - 7, w - 112, 14, 7);
       ctx.fill();
+      ctx.restore();
 
-      // Update bead positions & elastic 1D collisions
       const B = rail.beads;
       for (let i = 0; i < B.length; i++) {
         const b = B[i];
-        if (b !== beadsSim.draggingRailBead) {
-          b.x += b.vx * dt;
-          b.vx *= Math.pow(0.18, dt);
+        b.vx += beadsSim.railTilt * 920 * dt;
+
+        for (let pIdx = 0; pIdx < ptrList.length; pIdx++) {
+          const ptr = ptrList[pIdx];
+          if (ptr.grabbedBead === b) continue;
+          const d = Math.hypot(b.x - ptr.x, rail.y - ptr.y);
+          if (d < b.r + 36) {
+            const push = (b.x >= ptr.x ? 1 : -1) * 620 + beadsSim.lastVx * 0.65;
+            b.vx += push * dt * 10;
+          }
         }
+
+        b.vx *= Math.pow(0.24, dt);
+        b.x += b.vx * dt;
+
+        const minX = 64 + b.r;
+        const maxX = w - 64 - b.r;
         if (b.x < minX) {
           b.x = minX;
-          if (Math.abs(b.vx) > 45 && nowMs - beadsSim.lastClackMs > 35) {
-            beadsSim.lastClackMs = nowMs;
-            audio.playBeadCollision(Math.min(1, Math.abs(b.vx) / 480), 'track', b.id);
-          }
-          b.vx *= -0.75;
-        }
-        if (b.x > maxX) {
+          if (Math.abs(b.vx) > 45) audio.playBeadCollision(Math.min(1, Math.abs(b.vx) / 550), 'track', b.id);
+          b.vx = Math.abs(b.vx) * 0.84;
+        } else if (b.x > maxX) {
           b.x = maxX;
-          if (Math.abs(b.vx) > 45 && nowMs - beadsSim.lastClackMs > 35) {
-            beadsSim.lastClackMs = nowMs;
-            audio.playBeadCollision(Math.min(1, Math.abs(b.vx) / 480), 'track', b.id);
-          }
-          b.vx *= -0.75;
+          if (Math.abs(b.vx) > 45) audio.playBeadCollision(Math.min(1, Math.abs(b.vx) / 550), 'track', b.id);
+          b.vx = -Math.abs(b.vx) * 0.84;
         }
       }
 
-      // Newton's cradle pairwise momentum transfer along rail
-      for (let iter = 0; iter < 3; iter++) {
+      // Elastic Newton's cradle pairwise collisions
+      for (let iter = 0; iter < 4; iter++) {
         for (let i = 0; i < B.length - 1; i++) {
           const b1 = B[i];
           const b2 = B[i + 1];
@@ -1210,31 +1508,28 @@ function renderBeadsFrame(dt, nowMs) {
             b1.x -= overlap * 0.5;
             b2.x += overlap * 0.5;
             const relV = Math.abs(b1.vx - b2.vx);
-            if (relV > 40 && nowMs - beadsSim.lastClackMs > 32) {
+            if (relV > 38 && nowMs - beadsSim.lastClackMs > 28) {
               beadsSim.lastClackMs = nowMs;
-              audio.playBeadCollision(Math.min(1, relV / 500), 'track', b1.id);
+              audio.playBeadCollision(Math.min(1, relV / 480), 'track', b1.id);
             }
             const tmp = b1.vx;
-            b1.vx = b2.vx * 0.92;
-            b2.vx = tmp * 0.92;
+            b1.vx = b2.vx * 0.94;
+            b2.vx = tmp * 0.94;
           }
         }
       }
 
-      // Render sculpted glass/brass torus beads
+      // Render photorealistic 3D sphere sprites + central machined bore ring
       B.forEach((b) => {
         ctx.save();
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.65)';
-        ctx.shadowBlur = 14;
-        ctx.shadowOffsetY = 6;
-        const g = ctx.createRadialGradient(b.x - 9, rail.y - 11, 3, b.x, rail.y, b.r);
-        g.addColorStop(0, '#ffffff');
-        g.addColorStop(0.35, b.color);
-        g.addColorStop(1, '#0f172a');
-        ctx.beginPath();
-        ctx.arc(b.x, rail.y, b.r, 0, Math.PI * 2);
-        ctx.fillStyle = g;
-        ctx.fill();
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.78)';
+        ctx.shadowBlur = 18;
+        ctx.shadowOffsetY = 9;
+        const spr = beadsSim.sphereSprites[b.color];
+        if (spr) {
+          const drawSz = b.r * 2.28;
+          ctx.drawImage(spr, b.x - drawSz * 0.5, rail.y - drawSz * 0.5, drawSz, drawSz);
+        }
         ctx.restore();
       });
     });
@@ -1242,54 +1537,59 @@ function renderBeadsFrame(dt, nowMs) {
     const G = beadsSim.gelBeads;
     for (let i = 0; i < G.length; i++) {
       const b = G[i];
-      b.vy += 210 * dt;
-      b.squish *= Math.pow(0.05, dt);
+      b.vy += 190 * dt;
+      b.squish *= Math.pow(0.06, dt);
 
-      if (beadsSim.pointerActive) {
-        const dx = b.x - beadsSim.pointerX;
-        const dy = b.y - beadsSim.pointerY;
+      for (let pIdx = 0; pIdx < ptrList.length; pIdx++) {
+        const ptr = ptrList[pIdx];
+        const dx = b.x - ptr.x;
+        const dy = b.y - ptr.y;
         const d = Math.hypot(dx, dy) || 1;
-        if (d < 120) {
-          const push = (1 - d / 120) * 950;
+        if (d < 130) {
+          const push = (1 - d / 130) * 1120;
           b.vx += (dx / d) * push * dt;
           b.vy += (dy / d) * push * dt;
-          b.squish = Math.min(0.32, (1 - d / 120) * 0.3);
-          if (nowMs - beadsSim.lastClackMs > 65) {
+          b.squish = Math.max(b.squish, (1 - d / 130) * 0.36);
+          b.squishAngle = Math.atan2(dy, dx);
+          if (nowMs - beadsSim.lastClackMs > 60) {
             beadsSim.lastClackMs = nowMs;
-            audio.playBeadCollision(0.55, 'gel', b.id);
+            audio.playBeadCollision(0.58, 'gel', b.id);
           }
         }
       }
 
+      b.vx *= Math.pow(0.14, dt);
+      b.vy *= Math.pow(0.14, dt);
       b.x += b.vx * dt;
       b.y += b.vy * dt;
-      b.vx *= 0.92;
-      b.vy *= 0.92;
 
-      if (b.x < b.r + 24) { b.x = b.r + 24; b.vx *= -0.6; }
-      if (b.x > w - b.r - 24) { b.x = w - b.r - 24; b.vx *= -0.6; }
-      if (b.y < b.r + 24) { b.y = b.r + 24; b.vy *= -0.6; }
-      if (b.y > h - b.r - 24) { b.y = h - b.r - 24; b.vy *= -0.5; }
+      if (b.x < 48 + b.r) { b.x = 48 + b.r; b.vx *= -0.5; }
+      if (b.x > w - 48 - b.r) { b.x = w - 48 - b.r; b.vx *= -0.5; }
+      if (b.y < 58 + b.r) { b.y = 58 + b.r; b.vy *= -0.5; }
+      if (b.y > h - 58 - b.r) { b.y = h - 58 - b.r; b.vy *= -0.45; }
     }
 
-    // Soft-body hydrogel pairwise repulsion
+    // Soft-body hydrogel bead collisions
     for (let i = 0; i < G.length; i++) {
+      const a = G[i];
       for (let j = i + 1; j < G.length; j++) {
-        const a = G[i];
         const b = G[j];
         const dx = b.x - a.x;
         const dy = b.y - a.y;
-        const minD = a.r + b.r;
-        const d2 = dx * dx + dy * dy;
-        if (d2 > 0.01 && d2 < minD * minD) {
-          const d = Math.sqrt(d2);
-          const pen = (minD - d) * 0.45;
+        const minDist = a.r + b.r - 1.5;
+        if (Math.abs(dx) > minDist || Math.abs(dy) > minDist) continue;
+        const d = Math.hypot(dx, dy) || 0.01;
+        if (d < minDist) {
+          const overlap = (minDist - d) * 0.44;
           const nx = dx / d;
           const ny = dy / d;
-          a.x -= nx * pen;
-          a.y -= ny * pen;
-          b.x += nx * pen;
-          b.y += ny * pen;
+          a.x -= nx * overlap;
+          a.y -= ny * overlap;
+          b.x += nx * overlap;
+          b.y += ny * overlap;
+          const sq = Math.min(0.26, overlap * 0.045);
+          a.squish = Math.max(a.squish, sq);
+          b.squish = Math.max(b.squish, sq);
         }
       }
     }
@@ -1297,948 +1597,985 @@ function renderBeadsFrame(dt, nowMs) {
     G.forEach((b) => {
       ctx.save();
       ctx.translate(b.x, b.y);
-      ctx.scale(1 + b.squish, 1 - b.squish * 0.7);
-      const g = ctx.createRadialGradient(-b.r * 0.3, -b.r * 0.3, 2, 0, 0, b.r);
-      g.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
-      g.addColorStop(0.45, b.color);
-      g.addColorStop(1, 'rgba(15, 23, 42, 0.75)');
-      ctx.beginPath();
-      ctx.arc(0, 0, b.r, 0, Math.PI * 2);
-      ctx.fillStyle = g;
-      ctx.fill();
+      ctx.rotate(b.squishAngle || 0);
+      ctx.scale(1 + b.squish, 1 - b.squish * 0.72);
+      const spr = beadsSim.sphereSprites[b.color];
+      if (spr) {
+        const drawSz = b.r * 2.28;
+        ctx.globalAlpha = 0.92;
+        ctx.drawImage(spr, -drawSz * 0.5, -drawSz * 0.5, drawSz, drawSz);
+      }
       ctx.restore();
     });
+
+    // Render any popped gel micro-droplets
+    for (let i = beadsSim.gelDrops.length - 1; i >= 0; i--) {
+      const d = beadsSim.gelDrops[i];
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      d.life -= dt * 1.4;
+      if (d.life <= 0) {
+        beadsSim.gelDrops.splice(i, 1);
+        continue;
+      }
+      ctx.save();
+      ctx.globalAlpha = d.life;
+      ctx.fillStyle = d.color;
+      ctx.beginPath();
+      ctx.arc(d.x, d.y, d.r * d.life, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
   } else {
-    // Magnetic Orbit Loom
-    const nodes = beadsSim.orbitNodes;
-    nodes.forEach((n) => {
-      if (beadsSim.pointerActive) {
-        const dx = n.x - beadsSim.pointerX;
-        const dy = n.y - beadsSim.pointerY;
-        const d = Math.hypot(dx, dy) || 1;
-        if (d < 165) {
-          const force = (1 - d / 165) * 820;
-          n.vx += (dx / d) * force * dt;
-          n.vy += (dy / d) * force * dt;
-          if (nowMs - beadsSim.lastClackMs > 90) {
-            beadsSim.lastClackMs = nowMs;
-            audio.playBeadCollision(0.65, 'orbit', n.id);
+    // 3. Magnetic Orbit Loom
+    const O = beadsSim.orbitNodes;
+
+    // Central heavy magnetic core
+    ctx.save();
+    const coreGlow = ctx.createRadialGradient(360, 410, 8, 360, 410, 95);
+    coreGlow.addColorStop(0, 'rgba(56, 189, 248, 0.55)');
+    coreGlow.addColorStop(1, 'rgba(56, 189, 248, 0)');
+    ctx.fillStyle = coreGlow;
+    ctx.beginPath();
+    ctx.arc(360, 410, 95, 0, Math.PI * 2);
+    ctx.fill();
+    const coreSpr = beadsSim.sphereSprites['#f8fafc'];
+    if (coreSpr) ctx.drawImage(coreSpr, 360 - 44, 410 - 44, 88, 88);
+    ctx.restore();
+
+    for (let i = 0; i < O.length; i++) {
+      const n = O[i];
+      let isGrabbed = false;
+      for (const ptr of ptrList) {
+        if (ptr.grabbedOrbit === n) isGrabbed = true;
+      }
+
+      if (!isGrabbed) {
+        n.vx += (n.anchorX - n.x) * 26 * dt;
+        n.vy += (n.anchorY - n.y) * 26 * dt;
+
+        for (const ptr of ptrList) {
+          const dx = n.x - ptr.x;
+          const dy = n.y - ptr.y;
+          const d = Math.hypot(dx, dy) || 1;
+          if (d < 165) {
+            const f = (1 - d / 165) * 980;
+            n.vx -= (dx / d) * f * dt;
+            n.vy -= (dy / d) * f * dt;
+            if (nowMs - beadsSim.lastClackMs > 75) {
+              beadsSim.lastClackMs = nowMs;
+              audio.playBeadCollision(0.7, 'orbit', n.id);
+            }
           }
         }
-      }
-      n.vx += (n.ax - n.x) * 28 * dt;
-      n.vy += (n.ay - n.y) * 28 * dt;
-      n.vx *= Math.pow(0.08, dt);
-      n.vy *= Math.pow(0.08, dt);
-      n.x += n.vx * dt;
-      n.y += n.vy * dt;
-    });
 
-    // Draw glowing harmonic field lines
-    for (let i = 0; i < nodes.length; i++) {
-      for (let j = i + 1; j < nodes.length; j++) {
-        const a = nodes[i];
-        const b = nodes[j];
-        const d = Math.hypot(a.x - b.x, a.y - b.y);
-        if (d < 225) {
-          const strain = Math.min(1, (Math.hypot(a.vx, a.vy) + Math.hypot(b.vx, b.vy)) / 240);
+        n.vx *= Math.pow(0.08, dt);
+        n.vy *= Math.pow(0.08, dt);
+        n.x += n.vx * dt;
+        n.y += n.vy * dt;
+      }
+    }
+
+    // Glowing plasma tension filaments
+    ctx.save();
+    for (let i = 0; i < O.length; i++) {
+      for (let j = i + 1; j < O.length; j++) {
+        const d = Math.hypot(O[i].x - O[j].x, O[i].y - O[j].y);
+        if (d < 230) {
+          const alpha = (1 - d / 230) * 0.65;
+          ctx.strokeStyle = `rgba(56, 189, 248, ${alpha.toFixed(3)})`;
+          ctx.lineWidth = 1.6 + alpha * 2.8;
           ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.strokeStyle = strain > 0.25 ? '#5eead4' : 'rgba(56, 189, 248, 0.34)';
-          ctx.lineWidth = 1.6 + strain * 2.4;
+          ctx.moveTo(O[i].x, O[i].y);
+          ctx.lineTo(O[j].x, O[j].y);
           ctx.stroke();
         }
       }
     }
+    ctx.restore();
 
-    nodes.forEach((n) => {
-      const g = ctx.createRadialGradient(n.x - 5, n.y - 5, 2, n.x, n.y, n.r);
-      g.addColorStop(0, '#ffffff');
-      g.addColorStop(0.5, '#38bdf8');
-      g.addColorStop(1, '#0f172a');
-      ctx.beginPath();
-      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2);
-      ctx.fillStyle = g;
-      ctx.fill();
+    O.forEach((n) => {
+      const spr = beadsSim.sphereSprites[n.color];
+      if (spr) {
+        const sz = n.r * 2.35;
+        ctx.drawImage(spr, n.x - sz * 0.5, n.y - sz * 0.5, sz, sz);
+      }
     });
   }
 }
 
 /* ==========================================================================
-   4. FLUX: LIVING MAGNETIC FERROFLUID & 3D ELASTIC POP MEMBRANE
+   4. FLUX: 3D NORMAL-MAPPED FERROFLUID SHADER & 3D SILICONE POP TRAY
    ========================================================================== */
 
 const fluxSim = {
+  pointers: new Map(), // pointerId -> { x, y, lastX, lastY, strength }
   magnetActive: false,
   magX: 360,
-  magY: 360,
-  blobX: 360,
-  blobY: 360,
-  blobVx: 0,
-  blobVy: 0,
-  pulseEnergy: 0,
-  popDepths: new Array(25).fill(0),
-  popWaves: [],
-  draggingPop: false,
-  dragTargetState: true
+  magY: 410,
+  targetMagX: 360,
+  targetMagY: 410,
+  magStrength: 0,
+  satellites: [], // torn-off satellite droplets from fast finger swipes
+  popIndent: new Array(25).fill(0),
+  flipAngle: 0,
+  flipping: false,
+  tiltX: 0.24,
+  tiltY: 0,
+  targetTiltX: 0.24,
+  targetTiltY: 0
 };
+
+function getPopDomeCoords(idx, w, h) {
+  const row = Math.floor(idx / 5);
+  const col = idx % 5;
+  const boardSize = 540;
+  const startX = (w - boardSize) / 2 + 54;
+  const startY = (h - boardSize) / 2 + 54;
+  const step = (boardSize - 108) / 4;
+  return { x: startX + col * step, y: startY + row * step, r: 46 };
+}
 
 function initFluxStage() {
   const canvas = document.getElementById('fluxCanvas');
   if (!canvas) return;
 
-  for (let i = 0; i < 25; i++) {
-    fluxSim.popDepths[i] = state.poppedMap[i] ? 1 : 0;
-  }
-
-  function handlePopHit(pt, isFirstDown) {
-    const pad = 76;
-    const cell = (canvas.width - pad * 2) / 5;
-    const col = Math.floor((pt.x - pad) / cell);
-    const row = Math.floor((pt.y - pad) / cell);
-    if (col < 0 || col >= 5 || row < 0 || row >= 5) return;
-    const idx = row * 5 + col;
-    const cx = pad + col * cell + cell / 2;
-    const cy = pad + row * cell + cell / 2;
-    if (Math.hypot(pt.x - cx, pt.y - cy) > cell * 0.44) return;
-
-    if (isFirstDown) {
-      fluxSim.dragTargetState = !state.poppedMap[idx];
+  function testPopDomeAt(x, y) {
+    for (let i = 0; i < 25; i++) {
+      const d = getPopDomeCoords(i, canvas.width, canvas.height);
+      if (Math.hypot(x - d.x, y - d.y) <= d.r * 1.08) {
+        if (!state.poppedMap[i]) {
+          state.poppedMap[i] = true;
+          fluxSim.popIndent[i] = 1.0;
+          audio.playPop(Math.floor(i / 5), i % 5, false);
+          recordInteraction(1);
+        }
+        return i;
+      }
     }
-    if (state.poppedMap[idx] !== fluxSim.dragTargetState) {
-      state.poppedMap[idx] = fluxSim.dragTargetState;
-      audio.playPop(row, col, !fluxSim.dragTargetState);
-      fluxSim.popWaves.push({ x: cx, y: cy, r: 22, alpha: 0.85 });
-      recordInteraction(1);
-    }
+    return -1;
   }
 
   canvas.addEventListener('pointerdown', (e) => {
     e.preventDefault();
     canvas.setPointerCapture(e.pointerId);
+    audio.init();
     const pt = toCanvasPos(canvas, e.clientX, e.clientY);
+
+    fluxSim.pointers.set(e.pointerId, {
+      x: pt.x,
+      y: pt.y,
+      lastX: pt.x,
+      lastY: pt.y,
+      strength: 1.0
+    });
+
     if (state.fluxMode === 'ferro') {
       fluxSim.magnetActive = true;
-      fluxSim.magX = pt.x;
-      fluxSim.magY = pt.y;
-      audio.updateWorryHum(0.65);
+      fluxSim.targetMagX = pt.x;
+      fluxSim.targetMagY = pt.y;
+      audio.updateWorryHum(0.35);
       recordInteraction(1);
     } else {
-      fluxSim.draggingPop = true;
-      handlePopHit(pt, true);
+      testPopDomeAt(pt.x, pt.y);
     }
   });
 
   canvas.addEventListener('pointermove', (e) => {
+    const rec = fluxSim.pointers.get(e.pointerId);
+    if (!rec) return;
     const pt = toCanvasPos(canvas, e.clientX, e.clientY);
-    if (state.fluxMode === 'ferro' && fluxSim.magnetActive) {
-      const dist = Math.hypot(pt.x - fluxSim.magX, pt.y - fluxSim.magY);
-      fluxSim.magX = pt.x;
-      fluxSim.magY = pt.y;
-      audio.updateWorryHum(Math.min(1, 0.35 + dist / 35));
-    } else if (state.fluxMode === 'pop3d' && fluxSim.draggingPop) {
-      handlePopHit(pt, false);
+    const dx = pt.x - rec.lastX;
+    const dy = pt.y - rec.lastY;
+    rec.lastX = rec.x;
+    rec.lastY = rec.y;
+    rec.x = pt.x;
+    rec.y = pt.y;
+
+    if (state.fluxMode === 'ferro') {
+      fluxSim.targetMagX = pt.x;
+      fluxSim.targetMagY = pt.y;
+      const spd = Math.hypot(dx, dy);
+      const normDist = Math.min(1, Math.hypot(pt.x - 360, pt.y - 410) / 300);
+      audio.updateWorryHum(Math.min(1, spd / 35));
+
+      // Fast swipe tears off a satellite ferrofluid droplet that orbits back!
+      if (spd > 28 && fluxSim.satellites.length < 4) {
+        fluxSim.satellites.push({
+          x: pt.x,
+          y: pt.y,
+          vx: dx * 12,
+          vy: dy * 12,
+          strength: 0.72,
+          life: 1.0
+        });
+      }
+    } else {
+      testPopDomeAt(pt.x, pt.y);
+      // Dragging also tilts the 3D Pop Tray perspective in real time!
+      fluxSim.targetTiltY = Math.max(-0.42, Math.min(0.42, (pt.x - 360) / 520));
+      fluxSim.targetTiltX = Math.max(-0.15, Math.min(0.55, 0.24 + (pt.y - 410) / 620));
     }
   });
 
-  const endFluxPointer = () => {
-    fluxSim.magnetActive = false;
-    fluxSim.draggingPop = false;
-    audio.stopWorryHum();
+  const endFlux = (e) => {
+    fluxSim.pointers.delete(e.pointerId);
+    if (fluxSim.pointers.size === 0) {
+      fluxSim.magnetActive = false;
+      fluxSim.targetTiltX = 0.24;
+      fluxSim.targetTiltY = 0;
+      audio.stopWorryHum();
+    }
   };
-  canvas.addEventListener('pointerup', endFluxPointer);
-  canvas.addEventListener('pointercancel', endFluxPointer);
+  canvas.addEventListener('pointerup', endFlux);
+  canvas.addEventListener('pointercancel', endFlux);
 
-  document.querySelectorAll('[data-flux]').forEach((btn) => {
+  const resetBtn = document.getElementById('resetFluxBtn');
+  document.querySelectorAll('#panel-flux .quiet-pill').forEach((btn) => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('[data-flux]').forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('#panel-flux .quiet-pill').forEach((b) =>
+        b.classList.remove('active')
+      );
       btn.classList.add('active');
       state.fluxMode = btn.dataset.flux || 'ferro';
+      if (resetBtn) resetBtn.hidden = state.fluxMode !== 'pop3d';
       audio.stopWorryHum();
       audio.vibrate(7);
     });
   });
 
-  const flipBtn = document.getElementById('flipFluxBtn');
-  if (flipBtn) {
-    flipBtn.addEventListener('click', () => {
-      const frame = document.getElementById('fluxFrame');
+  if (resetBtn) {
+    resetBtn.addEventListener('click', () => {
+      audio.init();
+      fluxSim.flipping = true;
+      fluxSim.flipAngle = 0;
+      state.poppedMap.fill(false);
+      fluxSim.popIndent.fill(0);
       audio.playBoardFlip();
-      if (state.fluxMode === 'ferro') {
-        fluxSim.pulseEnergy = 1.0;
-      } else if (frame) {
-        frame.classList.add('flipping');
-        setTimeout(() => {
-          state.poppedMap.fill(false);
-          saveState();
-        }, 180);
-        setTimeout(() => {
-          frame.classList.remove('flipping');
-        }, 400);
-      }
       recordInteraction(1);
     });
   }
 }
 
 function renderFluxFrame(dt, nowMs) {
+  if (state.activeTab !== 'flux') return;
   const canvas = document.getElementById('fluxCanvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const w = canvas.width;
   const h = canvas.height;
-  ctx.clearRect(0, 0, w, h);
+  const timeSec = nowMs * 0.001;
 
   if (state.fluxMode === 'ferro') {
-    const targetX = fluxSim.magnetActive ? fluxSim.magX : w / 2;
-    const targetY = fluxSim.magnetActive ? fluxSim.magY : h / 2;
-    fluxSim.blobVx += (targetX - fluxSim.blobX) * 18 * dt;
-    fluxSim.blobVy += (targetY - fluxSim.blobY) * 18 * dt;
-    fluxSim.blobVx *= Math.pow(0.06, dt);
-    fluxSim.blobVy *= Math.pow(0.06, dt);
-    fluxSim.blobX += fluxSim.blobVx * dt;
-    fluxSim.blobY += fluxSim.blobVy * dt;
-    fluxSim.pulseEnergy *= Math.pow(0.08, dt);
+    fluxSim.magX += (fluxSim.targetMagX - fluxSim.magX) * Math.min(1, dt * 14);
+    fluxSim.magY += (fluxSim.targetMagY - fluxSim.magY) * Math.min(1, dt * 14);
+    const targetStr = fluxSim.magnetActive || fluxSim.pointers.size > 0 ? 1 : 0;
+    fluxSim.magStrength += (targetStr - fluxSim.magStrength) * Math.min(1, dt * 9);
 
-    const cx = fluxSim.blobX;
-    const cy = fluxSim.blobY;
+    // Build active magnetic poles from multi-touch fingers + primary magnetic core + satellites
+    const poles = [];
+    for (const p of fluxSim.pointers.values()) {
+      poles.push({ x: p.x, y: p.y, strength: 1.25, radius: 185 });
+    }
+    // Always maintain the primary ferrofluid reservoir pool so spikes & bridges gleam vividly
+    poles.push({
+      x: fluxSim.magX + Math.cos(timeSec * 1.1) * 18,
+      y: fluxSim.magY + Math.sin(timeSec * 1.3) * 18,
+      strength: poles.length > 0 ? 1.05 : 1.18,
+      radius: 195
+    });
 
-    // Backlit magnetic field rings
-    for (let k = 1; k <= 3; k++) {
-      ctx.beginPath();
-      ctx.arc(cx, cy, 130 + k * 46 + fluxSim.pulseEnergy * 45, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(56, 189, 248, ${(0.18 / k).toFixed(3)})`;
-      ctx.lineWidth = 2;
-      ctx.stroke();
+    for (let i = fluxSim.satellites.length - 1; i >= 0; i--) {
+      const sat = fluxSim.satellites[i];
+      const dx = w * 0.5 - sat.x;
+      const dy = h * 0.5 - sat.y;
+      sat.vx += dx * 4.5 * dt;
+      sat.vy += dy * 4.5 * dt;
+      sat.vx *= 0.94;
+      sat.vy *= 0.94;
+      sat.x += sat.vx * dt;
+      sat.y += sat.vy * dt;
+      sat.life -= dt * 0.65;
+      if (sat.life <= 0) {
+        fluxSim.satellites.splice(i, 1);
+      } else {
+        poles.push({ x: sat.x, y: sat.y, strength: sat.strength * sat.life, radius: 120 });
+      }
     }
 
-    // Rosensweig spiky ferrofluid crown
-    const spikes = 36;
-    const baseR = 138;
-    const magBoost = fluxSim.magnetActive ? 54 : 26;
-    ctx.save();
-    ctx.shadowColor = 'rgba(56, 189, 248, 0.45)';
-    ctx.shadowBlur = 28;
-    ctx.beginPath();
-    for (let i = 0; i <= spikes * 2; i++) {
-      const a = (i / (spikes * 2)) * Math.PI * 2;
-      const isTip = i % 2 === 0;
-      const wave = Math.sin(nowMs * 0.006 + i * 0.9) * 12;
-      const r =
-        baseR +
-        (isTip ? magBoost + wave + fluxSim.pulseEnergy * 65 : -16 - wave * 0.4);
-      const px = cx + Math.cos(a) * r;
-      const py = cy + Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
+    const accentRGB =
+      state.theme === 'biolum'
+        ? [0.2, 0.88, 0.65]
+        : state.theme === 'titanium'
+        ? [0.65, 0.78, 0.95]
+        : [0.22, 0.74, 0.98];
 
-    const ferroGrad = ctx.createRadialGradient(cx - 38, cy - 42, 12, cx, cy, baseR + 75);
-    ferroGrad.addColorStop(0, '#f8fafc');
-    ferroGrad.addColorStop(0.22, '#475569');
-    ferroGrad.addColorStop(0.55, '#0f172a');
-    ferroGrad.addColorStop(0.88, '#020617');
-    ferroGrad.addColorStop(1, '#38bdf8');
-    ctx.fillStyle = ferroGrad;
-    ctx.fill();
-    ctx.lineWidth = 2.5;
-    ctx.strokeStyle = 'rgba(125, 211, 252, 0.65)';
-    ctx.stroke();
-    ctx.restore();
-
-    // Inner 3D Rosensweig sub-spikes
-    for (let i = 0; i < 12; i++) {
-      const a = (i / 12) * Math.PI * 2 + nowMs * 0.0008;
-      const d = 58 + Math.sin(nowMs * 0.004 + i) * 14;
-      const sx = cx + Math.cos(a) * d;
-      const sy = cy + Math.sin(a) * d;
-      const sr = 18 + (fluxSim.magnetActive ? 7 : 0);
-      const sg = ctx.createRadialGradient(sx - 5, sy - 5, 1, sx, sy, sr);
-      sg.addColorStop(0, '#e2e8f0');
-      sg.addColorStop(0.5, '#1e293b');
-      sg.addColorStop(1, '#020617');
-      ctx.beginPath();
-      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
-      ctx.fillStyle = sg;
-      ctx.fill();
-    }
+    shaderPipe.renderFerrofluid(ctx, w, h, timeSec, poles, accentRGB);
   } else {
-    // 5x5 3D Elastic Bistable Silicone Pop Tray
-    const pad = 76;
-    const cell = (w - pad * 2) / 5;
+    // 3D Silicone Pop Tray rendered via Three.js PBR Studio3DEngine
+    fluxSim.tiltX += (fluxSim.targetTiltX - fluxSim.tiltX) * Math.min(1, dt * 10);
+    fluxSim.tiltY += (fluxSim.targetTiltY - fluxSim.tiltY) * Math.min(1, dt * 10);
 
-    // Neighbor membrane tension lines
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
-    ctx.lineWidth = 3;
-    for (let r = 0; r < 5; r++) {
-      for (let c = 0; c < 5; c++) {
-        const idx = r * 5 + c;
-        const target = state.poppedMap[idx] ? 1 : 0;
-        fluxSim.popDepths[idx] += (target - fluxSim.popDepths[idx]) * Math.min(1, dt * 18);
+    if (fluxSim.flipping) {
+      fluxSim.flipAngle += dt * Math.PI * 3.2;
+      if (fluxSim.flipAngle >= Math.PI) {
+        fluxSim.flipAngle = 0;
+        fluxSim.flipping = false;
       }
     }
 
-    for (let r = 0; r < 5; r++) {
-      for (let c = 0; c < 5; c++) {
-        const idx = r * 5 + c;
-        const dep = fluxSim.popDepths[idx];
-        const cx = pad + c * cell + cell / 2;
-        const cy = pad + r * cell + cell / 2;
-        const rad = cell * 0.39;
-
-        // Outer recessed silicone socket
-        ctx.beginPath();
-        ctx.arc(cx, cy, rad + 5, 0, Math.PI * 2);
-        ctx.fillStyle = '#090d14';
-        ctx.fill();
-
-        // 3D Silicone Dome shading flips with bistable depression depth
-        const lightOffset = (1 - dep * 2) * (rad * 0.32);
-        const domeGrad = ctx.createRadialGradient(
-          cx - lightOffset,
-          cy - lightOffset,
-          rad * 0.1,
-          cx,
-          cy,
-          rad
-        );
-        if (dep < 0.5) {
-          domeGrad.addColorStop(0, '#7dd3fc');
-          domeGrad.addColorStop(0.55, '#0284c7');
-          domeGrad.addColorStop(1, '#0c4a6e');
-        } else {
-          domeGrad.addColorStop(0, '#0f172a');
-          domeGrad.addColorStop(0.65, '#1e293b');
-          domeGrad.addColorStop(1, '#38bdf8');
-        }
-        ctx.beginPath();
-        ctx.arc(cx, cy, rad * (1 - dep * 0.08), 0, Math.PI * 2);
-        ctx.fillStyle = domeGrad;
-        ctx.fill();
-      }
+    for (let i = 0; i < 25; i++) {
+      const target = state.poppedMap[i] ? 1.0 : 0.0;
+      fluxSim.popIndent[i] += (target - fluxSim.popIndent[i]) * Math.min(1, dt * 16);
     }
 
-    // Pop shockwaves
-    for (let i = fluxSim.popWaves.length - 1; i >= 0; i--) {
-      const pw = fluxSim.popWaves[i];
-      pw.r += 240 * dt;
-      pw.alpha *= Math.pow(0.05, dt);
-      if (pw.alpha < 0.02) {
-        fluxSim.popWaves.splice(i, 1);
-        continue;
-      }
-      ctx.beginPath();
-      ctx.arc(pw.x, pw.y, pw.r, 0, Math.PI * 2);
-      ctx.strokeStyle = `rgba(125, 211, 252, ${pw.alpha.toFixed(3)})`;
-      ctx.lineWidth = 3;
-      ctx.stroke();
-    }
+    ctx.clearRect(0, 0, w, h);
+    const bg = ctx.createRadialGradient(w * 0.5, h * 0.3, 40, w * 0.5, h * 0.5, 520);
+    bg.addColorStop(0, '#162032');
+    bg.addColorStop(1, '#070b12');
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    studio3D.renderPopTray3D(ctx, w, h, fluxSim, state.poppedMap);
   }
 }
 
 /* ==========================================================================
-   5. SWITCH: MECHATRONIC POCKET DECK (SLIDER, FLYWHEEL DIAL, KEYS, ORBIT DISH)
+   5. SWITCH: PHOTOREALISTIC MACHINED METAL + SLINGSHOT & FLYWHEEL BRAKE
    ========================================================================== */
 
-const switchSim = {
-  sliderDragging: false,
-  dialDragging: false,
-  lastDialAngle: 0,
-  lastDialMs: 0,
-  sphereX: 300,
-  sphereY: 105,
-  sphereVx: 240,
-  sphereVy: 95,
-  dishDragging: false,
-  dishPointerX: 300,
-  dishPointerY: 105
+const orbitDishSim = {
+  ballX: 260,
+  ballY: 92,
+  vx: 240,
+  vy: 0,
+  mode: 'bowl', // 'bowl' | 'slingshot' | 'bumper'
+  pointerDown: false,
+  px: 260,
+  py: 92,
+  slingDragging: false,
+  slingX: 260,
+  slingY: 92,
+  trail: [],
+  lastTickMs: 0
+};
+
+const dialSim = {
+  dragging: false,
+  braking: false,
+  lastPointerAngle: 0,
+  pointers: new Map()
 };
 
 function initSwitchStage() {
-  // 1. Magnetic Haptic Track Slider (#sliderCanvas)
+  // 5A. Magnetic Detent Slider with Spring Physics & Flick Momentum
   const sliderCanvas = document.getElementById('sliderCanvas');
   if (sliderCanvas) {
-    const updateSliderFromEvent = (e) => {
+    let draggingSlider = false;
+    let lastX = 0;
+    const setSliderFromEvent = (e) => {
       const pt = toCanvasPos(sliderCanvas, e.clientX, e.clientY);
-      const norm = Math.max(0, Math.min(1, (pt.y - 45) / (sliderCanvas.height - 90)));
-      state.sliderVel = (norm - state.sliderPos) * 14;
+      const pad = 42;
+      const trackW = sliderCanvas.width - pad * 2;
+      const norm = Math.max(0, Math.min(1, (pt.x - pad) / trackW));
+      state.sliderVel = (norm - state.sliderPos) * 18;
       state.sliderPos = norm;
-      const det = Math.round(norm * 4);
-      if (det !== state.sliderDetent) {
-        state.sliderDetent = det;
-        audio.playRockerSwitch(det % 2 === 0);
+      const detent = Math.round(norm * 4);
+      if (detent !== state.sliderDetent) {
+        state.sliderDetent = detent;
+        audio.playDetentTick(detent / 4);
         recordInteraction(1);
       }
     };
 
     sliderCanvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      switchSim.sliderDragging = true;
       sliderCanvas.setPointerCapture(e.pointerId);
-      updateSliderFromEvent(e);
+      audio.init();
+      draggingSlider = true;
+      lastX = e.clientX;
+      setSliderFromEvent(e);
     });
     sliderCanvas.addEventListener('pointermove', (e) => {
-      if (switchSim.sliderDragging) updateSliderFromEvent(e);
+      if (!draggingSlider) return;
+      lastX = e.clientX;
+      setSliderFromEvent(e);
     });
-    const endSlider = () => {
-      switchSim.sliderDragging = false;
+    const releaseSlider = () => {
+      draggingSlider = false;
     };
-    sliderCanvas.addEventListener('pointerup', endSlider);
-    sliderCanvas.addEventListener('pointercancel', endSlider);
+    sliderCanvas.addEventListener('pointerup', releaseSlider);
+    sliderCanvas.addEventListener('pointercancel', releaseSlider);
   }
 
-  // 2. Inertia Flywheel Rotary Dial (#dialWheel / #dialCanvas)
-  const dialMount = document.getElementById('dialWheel');
-  if (dialMount) {
-    const getPointerDeg = (e) => {
-      const rect = dialMount.getBoundingClientRect();
-      const cx = rect.left + rect.width / 2;
-      const cy = rect.top + rect.height / 2;
-      return (Math.atan2(e.clientY - cy, e.clientX - cx) * 180) / Math.PI;
+  // 5B. High-Inertia Flywheel Dial with Single-Finger Spin, 2-Finger Twist & Outer-Rim Brake
+  const dialCanvas = document.getElementById('dialCanvas');
+  if (dialCanvas) {
+    const getAngle = (e) => {
+      const pt = toCanvasPos(dialCanvas, e.clientX, e.clientY);
+      return Math.atan2(pt.y - dialCanvas.height / 2, pt.x - dialCanvas.width / 2) * (180 / Math.PI);
     };
 
-    dialMount.addEventListener('pointerdown', (e) => {
+    dialCanvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();
-      switchSim.dialDragging = true;
-      dialMount.setPointerCapture(e.pointerId);
-      switchSim.lastDialAngle = getPointerDeg(e);
-      switchSim.lastDialMs = performance.now();
-      state.dialVelocity = 0;
+      dialCanvas.setPointerCapture(e.pointerId);
+      audio.init();
+      const pt = toCanvasPos(dialCanvas, e.clientX, e.clientY);
+      const dist = Math.hypot(pt.x - dialCanvas.width / 2, pt.y - dialCanvas.height / 2);
+
+      // Pressing on the outer caliper pad zone applies friction brake!
+      if (dist > 78 && Math.abs(state.dialVelocity) > 120) {
+        dialSim.braking = true;
+        audio.vibrate(10);
+      } else {
+        dialSim.dragging = true;
+        dialSim.lastPointerAngle = getAngle(e);
+        state.dialVelocity = 0;
+      }
     });
 
-    dialMount.addEventListener('pointermove', (e) => {
-      if (!switchSim.dialDragging) return;
-      const now = performance.now();
-      const cur = getPointerDeg(e);
-      let delta = cur - switchSim.lastDialAngle;
+    dialCanvas.addEventListener('pointermove', (e) => {
+      if (dialSim.braking) return;
+      if (!dialSim.dragging) return;
+      const cur = getAngle(e);
+      let delta = cur - dialSim.lastPointerAngle;
       if (delta > 180) delta -= 360;
       if (delta < -180) delta += 360;
-      const dt = Math.max(0.008, (now - switchSim.lastDialMs) / 1000);
       state.dialAngle = (state.dialAngle + delta + 360) % 360;
-      state.dialVelocity = delta / dt;
-      switchSim.lastDialAngle = cur;
-      switchSim.lastDialMs = now;
+      state.dialVelocity = delta * 52;
+      dialSim.lastPointerAngle = cur;
+
+      const detentIdx = Math.floor(state.dialAngle / 15);
+      if (detentIdx !== state.dialLastDetent) {
+        state.dialLastDetent = detentIdx;
+        audio.playDetentTick(Math.min(1, Math.abs(state.dialVelocity) / 400));
+        recordInteraction(1);
+      }
     });
 
     const endDial = () => {
-      switchSim.dialDragging = false;
+      dialSim.dragging = false;
+      dialSim.braking = false;
     };
-    dialMount.addEventListener('pointerup', endDial);
-    dialMount.addEventListener('pointercancel', endDial);
+    dialCanvas.addEventListener('pointerup', endDial);
+    dialCanvas.addEventListener('pointercancel', endDial);
   }
 
-  // 3. 4 Sculpted Mechanical Keycaps
-  const keys = document.querySelectorAll('.sculpted-key');
-  keys.forEach((keyBtn) => {
-    const profile = keyBtn.dataset.profile || 'thock';
-    const idx = parseInt(keyBtn.dataset.idx || '0', 10);
-
+  // 5C. 4 Sculpted Mechanical Keycaps
+  document.querySelectorAll('#keyGrid .mech-key').forEach((keyBtn) => {
+    const profile = keyBtn.dataset.switch || 'clicky';
     keyBtn.addEventListener('pointerdown', (e) => {
       e.preventDefault();
+      keyBtn.setPointerCapture(e.pointerId);
+      audio.init();
       keyBtn.classList.add('pressed');
-      audio.playKeySwitch(profile, idx, false);
+      audio.playKeySwitch(profile, 0, false);
       recordInteraction(1);
     });
-
     const releaseKey = () => {
-      if (keyBtn.classList.contains('pressed')) {
-        keyBtn.classList.remove('pressed');
-        audio.playKeySwitch(profile, idx, true);
-      }
+      if (!keyBtn.classList.contains('pressed')) return;
+      keyBtn.classList.remove('pressed');
+      audio.playKeySwitch(profile, 0, true);
     };
     keyBtn.addEventListener('pointerup', releaseKey);
-    keyBtn.addEventListener('pointerleave', releaseKey);
     keyBtn.addEventListener('pointercancel', releaseKey);
   });
 
-  // 4. Carved Obsidian Gravity Dish + Rolling Chrome Sphere (#orbitDishCanvas)
+  // 5D. Parabolic Obsidian Gravity Dish + Slingshot Ball Grab & Bumper Post
   const dishCanvas = document.getElementById('orbitDishCanvas');
   if (dishCanvas) {
     dishCanvas.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       dishCanvas.setPointerCapture(e.pointerId);
+      audio.init();
       const pt = toCanvasPos(dishCanvas, e.clientX, e.clientY);
-      switchSim.dishDragging = true;
-      switchSim.dishPointerX = pt.x;
-      switchSim.dishPointerY = pt.y;
+      orbitDishSim.pointerDown = true;
+      orbitDishSim.px = pt.x;
+      orbitDishSim.py = pt.y;
+
+      // If user touches near the chrome sphere, grab it in Slingshot mode!
+      if (Math.hypot(pt.x - orbitDishSim.ballX, pt.y - orbitDishSim.ballY) < 48) {
+        orbitDishSim.slingDragging = true;
+        orbitDishSim.slingX = pt.x;
+        orbitDishSim.slingY = pt.y;
+        orbitDishSim.vx = 0;
+        orbitDishSim.vy = 0;
+      } else {
+        orbitDishSim.vx += (pt.x - orbitDishSim.ballX) * 2.2;
+        orbitDishSim.vy += (pt.y - orbitDishSim.ballY) * 2.2;
+      }
       recordInteraction(1);
     });
     dishCanvas.addEventListener('pointermove', (e) => {
-      if (!switchSim.dishDragging) return;
+      if (!orbitDishSim.pointerDown) return;
       const pt = toCanvasPos(dishCanvas, e.clientX, e.clientY);
-      switchSim.dishPointerX = pt.x;
-      switchSim.dishPointerY = pt.y;
+      orbitDishSim.px = pt.x;
+      orbitDishSim.py = pt.y;
+      if (orbitDishSim.slingDragging) {
+        orbitDishSim.slingX = pt.x;
+        orbitDishSim.slingY = pt.y;
+      }
     });
     const endDish = () => {
-      switchSim.dishDragging = false;
-      audio.stopWorryHum();
+      if (orbitDishSim.slingDragging) {
+        // Launch slingshot!
+        orbitDishSim.vx = (orbitDishSim.ballX - orbitDishSim.slingX) * 9.5;
+        orbitDishSim.vy = (orbitDishSim.ballY - orbitDishSim.slingY) * 9.5;
+        audio.playBeadCollision(0.95, 'track', 1);
+      }
+      orbitDishSim.slingDragging = false;
+      orbitDishSim.pointerDown = false;
     };
     dishCanvas.addEventListener('pointerup', endDish);
     dishCanvas.addEventListener('pointercancel', endDish);
   }
 }
 
-function renderSwitchFrame(dt) {
-  // 1. Magnetic Slider
-  const sCanvas = document.getElementById('sliderCanvas');
-  if (sCanvas) {
-    const ctx = sCanvas.getContext('2d');
-    const w = sCanvas.width;
-    const h = sCanvas.height;
+function renderSwitchFrame(dt, nowMs) {
+  if (state.activeTab !== 'cube') return;
+
+  // 1. Render Magnetic Detent Slider
+  const sliderCanvas = document.getElementById('sliderCanvas');
+  if (sliderCanvas) {
+    const ctx = sliderCanvas.getContext('2d');
+    const w = sliderCanvas.width;
+    const h = sliderCanvas.height;
     ctx.clearRect(0, 0, w, h);
 
-    if (!switchSim.sliderDragging) {
-      const targetDetentPos = Math.round(state.sliderPos * 4) / 4;
-      state.sliderVel += (targetDetentPos - state.sliderPos) * 35 * dt;
-      state.sliderVel *= Math.pow(0.05, dt);
-      state.sliderPos = Math.max(0, Math.min(1, state.sliderPos + state.sliderVel * dt));
-    }
+    const targetPos = state.sliderDetent / 4;
+    state.sliderPos += (targetPos - state.sliderPos) * Math.min(1, dt * 14);
 
-    // Track groove
-    ctx.fillStyle = '#070a0f';
+    const pad = 42;
+    const trackW = w - pad * 2;
+    const cy = h / 2;
+
+    // CNC recessed dark anodized channel
+    const chGrad = ctx.createLinearGradient(0, cy - 18, 0, cy + 18);
+    chGrad.addColorStop(0, '#05080f');
+    chGrad.addColorStop(1, '#1e293b');
+    ctx.fillStyle = chGrad;
     ctx.beginPath();
-    ctx.roundRect(w / 2 - 18, 32, 36, h - 64, 18);
+    ctx.roundRect(pad - 18, cy - 18, trackW + 36, 36, 18);
     ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
 
-    // 5 Magnetic Detent LEDs
+    // 5 Magnetic Detent Wells with LED indicators
     for (let i = 0; i < 5; i++) {
-      const dy = 45 + (i / 4) * (h - 90);
-      const active = i === Math.round(state.sliderPos * 4);
+      const dx = pad + (i / 4) * trackW;
+      const active = i === state.sliderDetent;
       ctx.beginPath();
-      ctx.arc(w / 2 - 44, dy, 4.5, 0, Math.PI * 2);
-      ctx.fillStyle = active ? '#38bdf8' : 'rgba(148, 163, 184, 0.25)';
+      ctx.arc(dx, cy, active ? 8 : 5.5, 0, Math.PI * 2);
+      ctx.fillStyle = active ? '#38bdf8' : 'rgba(148, 163, 184, 0.32)';
       ctx.fill();
     }
 
-    // Knurled Titanium Shuttle Knob
-    const ky = 45 + state.sliderPos * (h - 90);
-    const knobGrad = ctx.createLinearGradient(0, ky - 28, 0, ky + 28);
-    knobGrad.addColorStop(0, '#64748b');
-    knobGrad.addColorStop(0.5, '#334155');
-    knobGrad.addColorStop(1, '#1e293b');
+    // Machined Titanium Thumb Carriage with knurled grooves & specular highlight
+    const thumbX = pad + state.sliderPos * trackW;
     ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.75)';
-    ctx.shadowBlur = 14;
-    ctx.shadowOffsetY = 5;
-    ctx.beginPath();
-    ctx.roundRect(w / 2 - 54, ky - 26, 108, 52, 14);
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur = 16;
+    ctx.shadowOffsetY = 6;
+    const knobGrad = ctx.createLinearGradient(thumbX - 28, cy - 28, thumbX + 28, cy + 28);
+    knobGrad.addColorStop(0, '#f8fafc');
+    knobGrad.addColorStop(0.45, '#64748b');
+    knobGrad.addColorStop(1, '#1e293b');
     ctx.fillStyle = knobGrad;
+    ctx.beginPath();
+    ctx.roundRect(thumbX - 28, cy - 26, 56, 52, 15);
     ctx.fill();
     ctx.restore();
 
-    ctx.strokeStyle = '#38bdf8';
-    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(15, 23, 42, 0.65)';
+    ctx.lineWidth = 2;
+    for (let k = -10; k <= 10; k += 5) {
+      ctx.beginPath();
+      ctx.moveTo(thumbX + k, cy - 14);
+      ctx.lineTo(thumbX + k, cy + 14);
+      ctx.stroke();
+    }
+  }
+
+  // 2. Render High-Inertia Flywheel Dial
+  const dialCanvas = document.getElementById('dialCanvas');
+  if (dialCanvas) {
+    if (!dialSim.dragging) {
+      const damp = dialSim.braking ? 0.015 : 0.36;
+      state.dialVelocity *= Math.pow(damp, dt);
+      if (Math.abs(state.dialVelocity) > 1.5) {
+        state.dialAngle = (state.dialAngle + state.dialVelocity * dt + 360) % 360;
+        const detentIdx = Math.floor(state.dialAngle / 15);
+        if (detentIdx !== state.dialLastDetent) {
+          state.dialLastDetent = detentIdx;
+          audio.playDetentTick(Math.min(1, Math.abs(state.dialVelocity) / 400));
+        }
+      }
+    }
+
+    const ctx = dialCanvas.getContext('2d');
+    const w = dialCanvas.width;
+    const h = dialCanvas.height;
+    const cx = w / 2;
+    const cy = h / 2;
+    const r = 82;
+    ctx.clearRect(0, 0, w, h);
+
+    // Outer degree ticks
+    for (let i = 0; i < 24; i++) {
+      const a = (i / 24) * Math.PI * 2;
+      ctx.beginPath();
+      ctx.moveTo(cx + Math.cos(a) * (r + 7), cy + Math.sin(a) * (r + 7));
+      ctx.lineTo(cx + Math.cos(a) * (r + 14), cy + Math.sin(a) * (r + 14));
+      ctx.strokeStyle =
+        i === state.dialLastDetent % 24 ? '#38bdf8' : 'rgba(148, 163, 184, 0.28)';
+      ctx.lineWidth = i % 6 === 0 ? 2.5 : 1.5;
+      ctx.stroke();
+    }
+
+    // CNC Brushed Metal Rotor with conic sheen
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,0.85)';
+    ctx.shadowBlur = 20;
+    ctx.shadowOffsetY = 8;
+    const dialGrad = ctx.createRadialGradient(cx - 22, cy - 24, 6, cx, cy, r);
+    dialGrad.addColorStop(0, '#94a3b8');
+    dialGrad.addColorStop(0.55, '#334155');
+    dialGrad.addColorStop(1, '#0f172a');
     ctx.beginPath();
-    ctx.moveTo(w / 2 - 24, ky);
-    ctx.lineTo(w / 2 + 24, ky);
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = dialGrad;
+    ctx.fill();
+    ctx.restore();
+
+    // High-RPM motion blur streak ring
+    const rpmNorm = Math.min(1, Math.abs(state.dialVelocity) / 900);
+    if (rpmNorm > 0.08) {
+      ctx.save();
+      ctx.strokeStyle = dialSim.braking
+        ? `rgba(251, 113, 133, ${rpmNorm * 0.85})`
+        : `rgba(56, 189, 248, ${rpmNorm * 0.7})`;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(cx, cy, r - 12, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Finger dimple indicator
+    const rad = (state.dialAngle * Math.PI) / 180;
+    const ix = cx + Math.cos(rad) * (r - 24);
+    const iy = cy + Math.sin(rad) * (r - 24);
+    ctx.beginPath();
+    ctx.arc(ix, iy, 12, 0, Math.PI * 2);
+    ctx.fillStyle = '#090d16';
+    ctx.fill();
+    ctx.strokeStyle = dialSim.braking ? '#fb7185' : '#38bdf8';
+    ctx.lineWidth = 2.5;
     ctx.stroke();
   }
 
-  // 2. Flywheel Rotary Dial
-  const dCanvas = document.getElementById('dialCanvas');
-  if (dCanvas) {
-    if (!switchSim.dialDragging && Math.abs(state.dialVelocity) > 0.5) {
-      state.dialAngle = (state.dialAngle + state.dialVelocity * dt + 360) % 360;
-      state.dialVelocity *= Math.pow(0.22, dt);
-    }
-    const detent = Math.floor(state.dialAngle / 15);
-    if (detent !== state.dialLastDetent) {
-      state.dialLastDetent = detent;
-      if (state.activeTab === 'cube') {
-        audio.playDetentTick(Math.min(1, Math.abs(state.dialVelocity) / 400 + 0.35));
+  // 3. Render Parabolic Obsidian Gravity Dish + Slingshot Ball
+  const dishCanvas = document.getElementById('orbitDishCanvas');
+  if (dishCanvas) {
+    const ctx = dishCanvas.getContext('2d');
+    const w = dishCanvas.width;
+    const h = dishCanvas.height;
+    const cx = w / 2;
+    const cy = h / 2;
+    const rx = w * 0.45;
+    const ry = h * 0.41;
+
+    if (!orbitDishSim.slingDragging) {
+      // Parabolic bowl restoring force + optional finger bumper/attractor
+      const tx = orbitDishSim.pointerDown ? orbitDishSim.px : cx;
+      const ty = orbitDishSim.pointerDown ? orbitDishSim.py : cy;
+      orbitDishSim.vx += (tx - orbitDishSim.ballX) * (orbitDishSim.pointerDown ? 13 : 5.2) * dt;
+      orbitDishSim.vy += (ty - orbitDishSim.ballY) * (orbitDishSim.pointerDown ? 13 : 5.2) * dt;
+
+      orbitDishSim.vx *= Math.pow(0.74, dt);
+      orbitDishSim.vy *= Math.pow(0.74, dt);
+      orbitDishSim.ballX += orbitDishSim.vx * dt;
+      orbitDishSim.ballY += orbitDishSim.vy * dt;
+
+      // Elliptical dish boundary collision
+      const nx = (orbitDishSim.ballX - cx) / (rx - 20);
+      const ny = (orbitDishSim.ballY - cy) / (ry - 20);
+      const normSq = nx * nx + ny * ny;
+      if (normSq > 1) {
+        const len = Math.sqrt(normSq);
+        orbitDishSim.ballX = cx + (nx / len) * (rx - 20);
+        orbitDishSim.ballY = cy + (ny / len) * (ry - 20);
+        orbitDishSim.vx *= -0.78;
+        orbitDishSim.vy *= -0.78;
+        if (nowMs - orbitDishSim.lastTickMs > 60) {
+          orbitDishSim.lastTickMs = nowMs;
+          audio.playBeadCollision(0.65, 'track', 3);
+        }
       }
     }
 
-    const ctx = dCanvas.getContext('2d');
-    const w = dCanvas.width;
-    const h = dCanvas.height;
-    const cx = w / 2;
-    const cy = h / 2;
-    const radius = w * 0.42;
+    orbitDishSim.trail.push({ x: orbitDishSim.ballX, y: orbitDishSim.ballY });
+    if (orbitDishSim.trail.length > 22) orbitDishSim.trail.shift();
+
     ctx.clearRect(0, 0, w, h);
 
-    const radAngle = (state.dialAngle * Math.PI) / 180;
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(radAngle);
-    for (let i = 0; i < 60; i++) {
-      const a = (i / 60) * Math.PI * 2;
+    // Concave polished obsidian dish
+    const dishGrad = ctx.createRadialGradient(cx, cy, 12, cx, cy, rx);
+    dishGrad.addColorStop(0, '#04070d');
+    dishGrad.addColorStop(0.72, '#0f172a');
+    dishGrad.addColorStop(1, '#334155');
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
+    ctx.fillStyle = dishGrad;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,0.16)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Glowing velocity ribbon
+    for (let i = 1; i < orbitDishSim.trail.length; i++) {
+      const p0 = orbitDishSim.trail[i - 1];
+      const p1 = orbitDishSim.trail[i];
+      const a = (i / orbitDishSim.trail.length) * 0.55;
       ctx.beginPath();
-      ctx.moveTo(Math.cos(a) * (radius - 2), Math.sin(a) * (radius - 2));
-      ctx.lineTo(Math.cos(a) * (radius + 5), Math.sin(a) * (radius + 5));
-      ctx.lineWidth = 2.2;
-      ctx.strokeStyle = i % 2 === 0 ? '#64748b' : '#1e293b';
+      ctx.moveTo(p0.x, p0.y);
+      ctx.lineTo(p1.x, p1.y);
+      ctx.strokeStyle = `rgba(56, 189, 248, ${a.toFixed(3)})`;
+      ctx.lineWidth = (i / orbitDishSim.trail.length) * 12;
+      ctx.lineCap = 'round';
       ctx.stroke();
     }
-    ctx.restore();
 
-    const faceGrad = ctx.createRadialGradient(cx - 25, cy - 25, 6, cx, cy, radius);
-    faceGrad.addColorStop(0, '#475569');
-    faceGrad.addColorStop(0.7, '#1e293b');
-    faceGrad.addColorStop(1, '#0f172a');
-    ctx.beginPath();
-    ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-    ctx.fillStyle = faceGrad;
-    ctx.fill();
-
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(radAngle);
-    ctx.beginPath();
-    ctx.arc(radius * 0.56, 0, 14, 0, Math.PI * 2);
-    ctx.fillStyle = '#090d14';
-    ctx.fill();
-    ctx.beginPath();
-    ctx.arc(radius * 0.56, 0, 6, 0, Math.PI * 2);
-    ctx.fillStyle = '#38bdf8';
-    ctx.fill();
-    ctx.restore();
-  }
-
-  // 3. Carved Obsidian Gravity Dish & Rolling Chrome Sphere
-  const oCanvas = document.getElementById('orbitDishCanvas');
-  if (oCanvas) {
-    const ctx = oCanvas.getContext('2d');
-    const w = oCanvas.width;
-    const h = oCanvas.height;
-    ctx.clearRect(0, 0, w, h);
-
-    const cx = w / 2;
-    const cy = h / 2;
-    if (switchSim.dishDragging) {
-      switchSim.sphereVx += (switchSim.dishPointerX - switchSim.sphereX) * 28 * dt;
-      switchSim.sphereVy += (switchSim.dishPointerY - switchSim.sphereY) * 28 * dt;
-      const spd = Math.hypot(switchSim.sphereVx, switchSim.sphereVy);
-      if (state.activeTab === 'cube') audio.updateWorryHum(Math.min(1, spd / 450));
-    } else {
-      // Dish parabolic gravity bowl pull toward center
-      switchSim.sphereVx += (cx - switchSim.sphereX) * 6.5 * dt;
-      switchSim.sphereVy += (cy - switchSim.sphereY) * 9.5 * dt;
-    }
-
-    switchSim.sphereVx *= Math.pow(0.55, dt);
-    switchSim.sphereVy *= Math.pow(0.55, dt);
-    switchSim.sphereX += switchSim.sphereVx * dt;
-    switchSim.sphereY += switchSim.sphereVy * dt;
-
-    // Elliptical rim boundary collision
-    const rx = w * 0.43;
-    const ry = h * 0.36;
-    const nx = (switchSim.sphereX - cx) / rx;
-    const ny = (switchSim.sphereY - cy) / ry;
-    const normDist = Math.hypot(nx, ny);
-    if (normDist > 1) {
-      switchSim.sphereX = cx + (nx / normDist) * rx;
-      switchSim.sphereY = cy + (ny / normDist) * ry;
-      const spd = Math.hypot(switchSim.sphereVx, switchSim.sphereVy);
-      if (spd > 65 && state.activeTab === 'cube') {
-        audio.playRollingBounce(Math.min(1, spd / 500));
-      }
-      switchSim.sphereVx *= -0.72;
-      switchSim.sphereVy *= -0.72;
-    }
-
-    // Draw carved obsidian contour rings
-    [0.92, 0.68, 0.42].forEach((s) => {
+    // Slingshot tension cord if user is pulling back the ball
+    if (orbitDishSim.slingDragging) {
+      ctx.save();
+      ctx.strokeStyle = '#fbbf24';
+      ctx.lineWidth = 3;
+      ctx.setLineDash([6, 5]);
       ctx.beginPath();
-      ctx.ellipse(cx, cy, rx * s, ry * s, 0, 0, Math.PI * 2);
-      ctx.strokeStyle = 'rgba(148, 163, 184, 0.1)';
-      ctx.lineWidth = 1.5;
+      ctx.moveTo(orbitDishSim.ballX, orbitDishSim.ballY);
+      ctx.lineTo(orbitDishSim.slingX, orbitDishSim.slingY);
       ctx.stroke();
-    });
+      ctx.restore();
+    }
 
-    // Draw rolling chrome sphere
-    const sr = 24;
-    ctx.save();
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.85)';
-    ctx.shadowBlur = 16;
-    ctx.shadowOffsetY = 6;
-    const sg = ctx.createRadialGradient(
-      switchSim.sphereX - 8,
-      switchSim.sphereY - 8,
-      2,
-      switchSim.sphereX,
-      switchSim.sphereY,
-      sr
-    );
-    sg.addColorStop(0, '#ffffff');
-    sg.addColorStop(0.45, '#94a3b8');
-    sg.addColorStop(1, '#0f172a');
-    ctx.beginPath();
-    ctx.arc(switchSim.sphereX, switchSim.sphereY, sr, 0, Math.PI * 2);
-    ctx.fillStyle = sg;
-    ctx.fill();
-    ctx.restore();
+    // Heavy Chrome Sphere
+    const spr = beadsSim.sphereSprites['#f8fafc'];
+    if (spr) {
+      ctx.drawImage(spr, orbitDishSim.ballX - 24, orbitDishSim.ballY - 24, 48, 48);
+    }
   }
 }
 
 /* ==========================================================================
-   6. BREATHE: 3D REFRACTIVE GLASS & GRAVITATIONAL PARTICLE CORE
+   6. BREATHE: 3D VOLUMETRIC GLASS ORB + DIRECT 3D GALAXY ROTATION
    ========================================================================== */
 
 const BREATH_PATTERNS = {
-  deepdraw: { inhale: 4, hold: 2, exhale: 6 },
-  box: { inhale: 4, hold: 4, exhale: 4, holdOut: 4 },
-  calm478: { inhale: 4, hold: 7, exhale: 8 }
+  deepdraw: {
+    phases: [
+      { name: 'DEEP DRAW', sec: 5, scaleStart: 0.35, scaleEnd: 1.0, cue: 'inhale' },
+      { name: 'HOLD FULL', sec: 2, scaleStart: 1.0, scaleEnd: 1.0, cue: 'hold' },
+      { name: 'SLOW RELEASE', sec: 6, scaleStart: 1.0, scaleEnd: 0.35, cue: 'exhale' }
+    ]
+  },
+  sigh: {
+    phases: [
+      { name: 'INHALE', sec: 2.5, scaleStart: 0.35, scaleEnd: 0.82, cue: 'inhale' },
+      { name: 'TOP-OFF SIP', sec: 1.5, scaleStart: 0.82, scaleEnd: 1.0, cue: 'inhale' },
+      { name: 'LONG SIGH', sec: 6, scaleStart: 1.0, scaleEnd: 0.35, cue: 'exhale' }
+    ]
+  },
+  coherent: {
+    phases: [
+      { name: 'INHALE', sec: 5.5, scaleStart: 0.35, scaleEnd: 1.0, cue: 'inhale' },
+      { name: 'EXHALE', sec: 5.5, scaleStart: 1.0, scaleEnd: 0.35, cue: 'exhale' }
+    ]
+  }
 };
 
-const breatheParticles = [];
+const breatheSim = {
+  rotX: 0.25,
+  rotY: 0.0,
+  velRotX: 0,
+  velRotY: 0,
+  dragging: false,
+  lastX: 0,
+  lastY: 0
+};
 
 function initBreatheStage() {
-  for (let i = 0; i < 140; i++) {
-    breatheParticles.push({
-      angle: Math.random() * Math.PI * 2,
-      dist: 60 + Math.random() * 240,
-      speed: 0.35 + Math.random() * 0.85,
-      size: 1.8 + Math.random() * 3.2
-    });
-  }
-
-  const orbWrap = document.getElementById('breatheOrbTrigger');
-  if (orbWrap) {
-    orbWrap.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      state.breathHoldOverride = true;
-      state.breathHoldStart = performance.now();
-      audio.playBreathCue('inhale');
-      recordInteraction(1);
-    });
-  }
-
-  const releaseHold = () => {
-    if (!state.breathHoldOverride) return;
-    state.breathHoldOverride = false;
-    audio.playBreathCue('exhale');
-  };
-  window.addEventListener('pointerup', releaseHold);
-  window.addEventListener('pointercancel', releaseHold);
-
-  document.querySelectorAll('[data-pattern]').forEach((btn) => {
+  document.querySelectorAll('#panel-breathe .quiet-pill').forEach((btn) => {
     btn.addEventListener('click', () => {
-      document.querySelectorAll('[data-pattern]').forEach((b) => b.classList.remove('active'));
+      document.querySelectorAll('#panel-breathe .quiet-pill').forEach((b) =>
+        b.classList.remove('active')
+      );
       btn.classList.add('active');
       state.breathPattern = btn.dataset.pattern || 'deepdraw';
       state.lastBreathPhase = '';
-      audio.vibrate(8);
     });
   });
+
+  const canvas = document.getElementById('breatheCanvas');
+  if (!canvas) return;
+
+  canvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    canvas.setPointerCapture(e.pointerId);
+    audio.init();
+    const pt = toCanvasPos(canvas, e.clientX, e.clientY);
+    breatheSim.dragging = true;
+    breatheSim.lastX = pt.x;
+    breatheSim.lastY = pt.y;
+    state.breathHoldOverride = true;
+    state.breathHoldStart = performance.now();
+    audio.playBreathCue('inhale');
+    recordInteraction(1);
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!breatheSim.dragging) return;
+    const pt = toCanvasPos(canvas, e.clientX, e.clientY);
+    const dx = pt.x - breatheSim.lastX;
+    const dy = pt.y - breatheSim.lastY;
+    breatheSim.lastX = pt.x;
+    breatheSim.lastY = pt.y;
+    breatheSim.velRotY = dx * 0.012;
+    breatheSim.velRotX = dy * 0.012;
+    breatheSim.rotY += breatheSim.velRotY;
+    breatheSim.rotX = Math.max(-1.2, Math.min(1.2, breatheSim.rotX + breatheSim.velRotX));
+  });
+
+  const releaseHold = () => {
+    breatheSim.dragging = false;
+    if (state.breathHoldOverride) {
+      state.breathHoldOverride = false;
+      audio.playBreathCue('exhale');
+    }
+  };
+  canvas.addEventListener('pointerup', releaseHold);
+  canvas.addEventListener('pointercancel', releaseHold);
 }
 
 function renderBreatheFrame(dt, nowMs) {
+  if (state.activeTab !== 'breathe') return;
   const canvas = document.getElementById('breatheCanvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   const w = canvas.width;
   const h = canvas.height;
-  const cx = w / 2;
-  const cy = h / 2;
-  ctx.clearRect(0, 0, w, h);
+  const timeSec = nowMs * 0.001;
 
-  const p = BREATH_PATTERNS[state.breathPattern] || BREATH_PATTERNS.deepdraw;
-  const holdOut = p.holdOut || 0;
-  const totalCycle = p.inhale + p.hold + p.exhale + holdOut;
+  if (!breatheSim.dragging) {
+    breatheSim.rotY += breatheSim.velRotY;
+    breatheSim.rotX = Math.max(-1.2, Math.min(1.2, breatheSim.rotX + breatheSim.velRotX));
+    breatheSim.velRotX *= Math.pow(0.15, dt);
+    breatheSim.velRotY *= Math.pow(0.15, dt);
+  }
 
-  let phaseLabel = 'Deep Draw';
-  let phaseProgress = 0;
-  let scaleNorm = 0.5;
-  let remainingSec = 0;
-  let phaseKey = 'inhale';
+  let phaseName = 'DEEP DRAW';
+  let scaleFactor = 0.65;
+  let countdownText = '5.0s';
 
   if (state.breathHoldOverride) {
     const heldSec = (nowMs - state.breathHoldStart) / 1000;
-    phaseLabel = 'Drawing In';
-    phaseProgress = Math.min(1, heldSec / 5);
-    scaleNorm = 0.35 + 0.65 * (1 - Math.exp(-heldSec * 0.55));
-    remainingSec = heldSec;
+    phaseName = heldSec < 5 ? 'DRAWING IN' : 'FULL CAPACITY';
+    scaleFactor = Math.min(1.08, 0.38 + (heldSec / 5) * 0.7);
+    countdownText = `${heldSec.toFixed(1)}s`;
   } else {
-    const t = (nowMs / 1000) % totalCycle;
-    if (t < p.inhale) {
-      phaseKey = 'inhale';
-      phaseLabel = state.breathPattern === 'deepdraw' ? 'Deep Draw' : 'Breathe In';
-      phaseProgress = t / p.inhale;
-      scaleNorm = 0.5 - 0.5 * Math.cos(phaseProgress * Math.PI);
-      remainingSec = p.inhale - t;
-    } else if (t < p.inhale + p.hold) {
-      phaseKey = 'hold';
-      phaseLabel = 'Hold';
-      const elapsed = t - p.inhale;
-      phaseProgress = elapsed / p.hold;
-      scaleNorm = 1.0;
-      remainingSec = p.hold - elapsed;
-    } else if (t < p.inhale + p.hold + p.exhale) {
-      phaseKey = 'exhale';
-      phaseLabel = 'Slow Exhale';
-      const elapsed = t - p.inhale - p.hold;
-      phaseProgress = elapsed / p.exhale;
-      scaleNorm = 0.5 + 0.5 * Math.cos(phaseProgress * Math.PI);
-      remainingSec = p.exhale - elapsed;
-    } else {
-      phaseKey = 'holdOut';
-      phaseLabel = 'Rest';
-      const elapsed = t - p.inhale - p.hold - p.exhale;
-      phaseProgress = elapsed / holdOut;
-      scaleNorm = 0.0;
-      remainingSec = holdOut - elapsed;
+    const pat = BREATH_PATTERNS[state.breathPattern] || BREATH_PATTERNS.deepdraw;
+    const totalSec = pat.phases.reduce((acc, p) => acc + p.sec, 0);
+    const t = (nowMs / 1000) % totalSec;
+
+    let acc = 0;
+    let activePhase = pat.phases[0];
+    let localT = 0;
+    for (const p of pat.phases) {
+      if (t >= acc && t < acc + p.sec) {
+        activePhase = p;
+        localT = (t - acc) / p.sec;
+        countdownText = `${Math.ceil(p.sec - (t - acc))}s`;
+        break;
+      }
+      acc += p.sec;
     }
 
-    if (state.activeTab === 'breathe' && phaseKey !== state.lastBreathPhase) {
-      state.lastBreathPhase = phaseKey;
-      audio.playBreathCue(phaseKey === 'inhale' ? 'inhale' : phaseKey === 'hold' ? 'hold' : 'exhale');
+    phaseName = activePhase.name;
+    const smoothT = 0.5 - 0.5 * Math.cos(localT * Math.PI);
+    scaleFactor =
+      activePhase.scaleStart + (activePhase.scaleEnd - activePhase.scaleStart) * smoothT;
+
+    if (state.lastBreathPhase !== activePhase.name) {
+      state.lastBreathPhase = activePhase.name;
+      audio.playBreathCue(activePhase.cue);
     }
   }
 
-  const orbR = w * (0.21 + 0.16 * scaleNorm);
+  ctx.clearRect(0, 0, w, h);
+  const bg = ctx.createRadialGradient(w * 0.5, h * 0.5, 20, w * 0.5, h * 0.5, 420);
+  bg.addColorStop(0, '#132036');
+  bg.addColorStop(1, '#060a11');
+  ctx.fillStyle = bg;
+  ctx.fillRect(0, 0, w, h);
 
-  // Gravitational vortex particles
-  breatheParticles.forEach((pt) => {
-    pt.angle += pt.speed * dt;
-    const radialVel = phaseKey === 'inhale' || state.breathHoldOverride ? -68 : phaseKey === 'exhale' ? 62 : 0;
-    pt.dist += radialVel * dt;
-    if (pt.dist < 42) pt.dist = 290;
-    if (pt.dist > 300) pt.dist = 55;
-
-    const px = cx + Math.cos(pt.angle) * pt.dist;
-    const py = cy + Math.sin(pt.angle) * pt.dist;
-    ctx.beginPath();
-    ctx.arc(px, py, pt.size, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(94, 234, 212, 0.58)';
-    ctx.fill();
-  });
-
-  // Luminous Optical Glass Sphere
-  const glowGrad = ctx.createRadialGradient(
-    cx - orbR * 0.28,
-    cy - orbR * 0.32,
-    orbR * 0.08,
-    cx,
-    cy,
-    orbR * 1.15
+  // Render 3D Volumetric Glass Sphere & 320-Particle Galaxy via Three.js PBR Studio3DEngine
+  studio3D.renderBreathe3D(
+    ctx,
+    w,
+    h,
+    dt,
+    timeSec,
+    scaleFactor,
+    phaseName,
+    breatheSim.rotX,
+    breatheSim.rotY
   );
-  glowGrad.addColorStop(0, 'rgba(167, 243, 208, 0.58)');
-  glowGrad.addColorStop(0.45, 'rgba(56, 189, 248, 0.32)');
-  glowGrad.addColorStop(0.82, 'rgba(20, 45, 76, 0.72)');
-  glowGrad.addColorStop(1, 'rgba(12, 20, 32, 0.0)');
 
-  ctx.beginPath();
-  ctx.arc(cx, cy, orbR * 1.12, 0, Math.PI * 2);
-  ctx.fillStyle = glowGrad;
-  ctx.fill();
-
-  ctx.beginPath();
-  ctx.arc(cx, cy, orbR, 0, Math.PI * 2);
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.28)';
-  ctx.lineWidth = 2;
-  ctx.stroke();
-
-  ctx.beginPath();
-  ctx.arc(cx, cy, orbR + 8, -Math.PI / 2, -Math.PI / 2 + phaseProgress * Math.PI * 2);
-  ctx.strokeStyle = '#5eead4';
-  ctx.lineWidth = 3.5;
-  ctx.lineCap = 'round';
-  ctx.stroke();
-
+  // Crisp center typography overlay
+  ctx.save();
   ctx.fillStyle = '#f8fafc';
-  ctx.font = '600 32px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
+  ctx.font = '700 26px -apple-system, BlinkMacSystemFont, sans-serif';
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(phaseLabel, cx, cy - 12);
+  ctx.fillText(phaseName, w * 0.5, h * 0.5 - 6);
 
-  ctx.fillStyle = 'rgba(241, 245, 249, 0.75)';
-  ctx.font = '500 22px -apple-system, BlinkMacSystemFont, "Inter", sans-serif';
-  ctx.fillText(`${remainingSec.toFixed(1)}s`, cx, cy + 26);
+  ctx.fillStyle = 'rgba(226, 232, 240, 0.78)';
+  ctx.font = '600 18px "SF Mono", Menlo, monospace';
+  ctx.fillText(countdownText, w * 0.5, h * 0.5 + 26);
+  ctx.restore();
 }
 
 /* ==========================================================================
-   PWA INSTALL, SERVICE WORKER & 60FPS STUDIO LOOP
+   MASTER 60FPS STUDIO RENDER LOOP & INITIALIZATION
    ========================================================================== */
-
-function initPWA() {
-  let deferredPrompt = null;
-  const installBtn = document.getElementById('installTopBtn');
-  const isStandalone =
-    window.matchMedia('(display-mode: standalone)').matches ||
-    window.navigator.standalone === true;
-
-  if (!isStandalone) {
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      deferredPrompt = e;
-      if (installBtn) installBtn.hidden = false;
-    });
-  }
-
-  if (installBtn) {
-    installBtn.addEventListener('click', async () => {
-      if (!deferredPrompt) return;
-      deferredPrompt.prompt();
-      await deferredPrompt.userChoice;
-      deferredPrompt = null;
-      installBtn.hidden = true;
-    });
-  }
-
-  window.addEventListener('appinstalled', () => {
-    deferredPrompt = null;
-    if (installBtn) installBtn.hidden = true;
-  });
-
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker
-      .register('./sw.js')
-      .then((reg) => {
-        if (reg.waiting) showUpdateBanner(reg.waiting);
-        reg.addEventListener('updatefound', () => {
-          const nw = reg.installing;
-          if (!nw) return;
-          nw.addEventListener('statechange', () => {
-            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
-              showUpdateBanner(nw);
-            }
-          });
-        });
-      })
-      .catch(() => {});
-  }
-}
-
-function showUpdateBanner(worker) {
-  const banner = document.getElementById('updateBanner');
-  const btn = document.getElementById('reloadSwBtn');
-  if (!banner || !btn) return;
-  banner.hidden = false;
-  btn.onclick = () => worker.postMessage({ type: 'SKIP_WAITING' });
-}
 
 let lastFrameMs = performance.now();
 
-function studioFrame(nowMs) {
-  const dt = Math.min(0.04, Math.max(0.004, (nowMs - lastFrameMs) / 1000));
+function masterLoop(nowMs) {
+  const dt = Math.min(0.05, Math.max(0.001, (nowMs - lastFrameMs) / 1000));
   lastFrameMs = nowMs;
 
   renderBalloonFrame(dt, nowMs);
   renderPourFrame(dt, nowMs);
   renderBeadsFrame(dt, nowMs);
   renderFluxFrame(dt, nowMs);
-  renderSwitchFrame(dt);
+  renderSwitchFrame(dt, nowMs);
   renderBreatheFrame(dt, nowMs);
 
-  requestAnimationFrame(studioFrame);
+  requestAnimationFrame(masterLoop);
 }
 
-window.__steadyHandsDebug = {
-  state,
-  balloonSim,
-  pourSim,
-  beadsSim,
-  fluxSim,
-  switchSim,
-  triggerBalloonBurst
-};
+function registerServiceWorker() {
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    });
+  }
+}
 
-window.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', () => {
   loadState();
+  applyPreferencesUI();
   initTopBarAndSheet();
   initDockNavigation();
   initBalloonStage();
@@ -2247,7 +2584,6 @@ window.addEventListener('DOMContentLoaded', () => {
   initFluxStage();
   initSwitchStage();
   initBreatheStage();
-  applyPreferencesUI();
-  initPWA();
-  requestAnimationFrame(studioFrame);
+  registerServiceWorker();
+  requestAnimationFrame(masterLoop);
 });

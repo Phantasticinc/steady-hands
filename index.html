@@ -69,11 +69,17 @@
           </div>
 
           <div class="stage-bottom-bar">
-            <div class="minimal-pill-group" role="group" aria-label="Balloon Fill Alchemy">
+            <div class="minimal-pill-group" id="balloonModeControl" role="group" aria-label="Balloon Fill Alchemy">
               <button type="button" class="quiet-pill active" data-alchemy="water">Water</button>
               <button type="button" class="quiet-pill" data-alchemy="chrome">Liquid Chrome</button>
               <button type="button" class="quiet-pill" data-alchemy="biolume">Biolume</button>
             </div>
+            <button id="inflateBalloonBtn" class="quiet-icon-pill" type="button" title="Inflate Fresh Balloon">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M12 5v14"/><path d="M5 12h14"/>
+              </svg>
+              <span>Fresh</span>
+            </button>
           </div>
         </div>
       </section>
@@ -109,11 +115,18 @@
           </div>
 
           <div class="stage-bottom-bar">
-            <div class="minimal-pill-group" role="group" aria-label="Bead Physics Mode">
+            <div class="minimal-pill-group" id="beadsModeControl" role="group" aria-label="Bead Physics Mode">
               <button type="button" class="quiet-pill active" data-beads="track">Abacus</button>
               <button type="button" class="quiet-pill" data-beads="gel">Gel Pit</button>
               <button type="button" class="quiet-pill" data-beads="orbit">Orbit Loom</button>
             </div>
+            <button id="shuffleBeadsBtn" class="quiet-icon-pill" type="button" title="Impulse Wave / Refill">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <polyline points="16 3 21 3 21 8"/><line x1="4" y1="20" x2="21" y2="3"/>
+                <polyline points="21 16 21 21 16 21"/><line x1="15" y1="15" x2="21" y2="21"/>
+              </svg>
+              <span>Pulse</span>
+            </button>
           </div>
         </div>
       </section>
