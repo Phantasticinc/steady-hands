@@ -1,0 +1,84 @@
+{
+  "id": "/steady-hands/",
+  "name": "SteadyHands — Physics Fidget, Focus & Urge Relief",
+  "short_name": "SteadyHands",
+  "description": "Next-generation physics fidget studio for autism self-regulation, 3-minute smoking urge surfing, and deep focus. 100% offline, zero ads, zero data collection.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b0d12",
+  "theme_color": "#0b0d12",
+  "categories": ["lifestyle", "entertainment", "games"],
+  "prefer_related_applications": false,
+  "icons": [
+    {
+      "src": "icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/icon-maskable-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "store-assets/screenshot-1-popit.png",
+      "sizes": "840x1720",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Balloon Alchemy — Soft-Body Water, Liquid Chrome & Bioluminescent Burst"
+    },
+    {
+      "src": "store-assets/screenshot-2-cube.png",
+      "sizes": "840x1720",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Gravity & Zero-G Fluid Pour — Tiered Glass Vessels & Two-Tone Elixir"
+    },
+    {
+      "src": "store-assets/screenshot-3-breathe.png",
+      "sizes": "840x1720",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Newton's Cradle Beads, Squishy Hydrogel Pit & Magnetic Orbit Loom"
+    },
+    {
+      "src": "store-assets/screenshot-4-spinner.png",
+      "sizes": "840x1720",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Living Magnetic Ferrofluid Crown & 3D Silicone Pop Tray"
+    },
+    {
+      "src": "store-assets/screenshot-5-keys.png",
+      "sizes": "840x1720",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "CNC Mechatronic Switch Deck — Haptic Slider, Flywheel Dial, Keys & Orbit Dish"
+    },
+    {
+      "src": "store-assets/screenshot-6-keys.png",
+      "sizes": "840x1720",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "Gravitational Vortex Breathe Core — Deep Draw 4-2-6 Craving Pacer"
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "packageId": "com.phantasticvanguard.fidget",
+  "host": "phantasticinc.github.io",
+  "name": "SteadyHands",
+  "launcherName": "SteadyHands",
+  "display": "standalone",
+  "themeColor": "#0B0D12",
+  "themeColorDark": "#0B0D12",
+  "navigationColor": "#0B0D12",
+  "navigationColorDark": "#0B0D12",
+  "navigationDividerColor": "#131822",
+  "navigationDividerColorDark": "#131822",
+  "backgroundColor": "#0B0D12",
+  "enableNotifications": false,
+  "startUrl": "/steady-hands/index.html",
+  "iconUrl": "https://phantasticinc.github.io/steady-hands/icons/icon-512.png",
+  "maskableIconUrl": "https://phantasticinc.github.io/steady-hands/icons/icon-maskable-512.png",
+  "splashScreenFadeOutDuration": 250,
+  "signingKey": {
+    "path": "./android.keystore",
+    "alias": "steadyhands-upload"
+  },
+  "appVersionName": "1.0.0",
+  "appVersionCode": 1,
+  "shortcuts": [],
+  "generatorApp": "bubblewrap-cli",
+  "webManifestUrl": "https://phantasticinc.github.io/steady-hands/manifest.json",
+  "fallbackType": "customtabs",
+  "features": {},
+  "alphaDependencies": {
+    "enabled": false
+  },
+  "enableSiteSettingsShortcut": false,
+  "isChromeOSOnly": false,
+  "isMetaQuest": false,
+  "fullScopeUrl": "https://phantasticinc.github.io/steady-hands/",
+  "minSdkVersion": 24,
+  "targetSdkVersion": 36,
+  "orientation": "portrait",
+  "fingerprints": []
+}
