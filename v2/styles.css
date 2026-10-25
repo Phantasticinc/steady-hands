@@ -1,0 +1,849 @@
+:root {
+  --bg-deep: #0b0d12;
+  --bg-surface: #131720;
+  --bg-elevated: #1b212d;
+  --bg-tray: #161b26;
+  --border-subtle: rgba(255, 255, 255, 0.065);
+  --border-highlight: rgba(255, 255, 255, 0.13);
+  --text-main: #f1f5f9;
+  --text-muted: #94a3b8;
+  --text-dim: #64748b;
+  --accent: #38bdf8;
+  --accent-warm: #f59e0b;
+  --accent-calm: #34d399;
+  --shadow-hardware:
+    0 26px 54px -14px rgba(0, 0, 0, 0.78),
+    inset 0 1.5px 1px rgba(255, 255, 255, 0.11),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.65);
+  --shadow-well:
+    inset 0 4px 10px rgba(0, 0, 0, 0.78),
+    inset 0 1px 2px rgba(0, 0, 0, 0.85),
+    0 1px 0 rgba(255, 255, 255, 0.06);
+  --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", "Segoe UI", Roboto, sans-serif;
+  --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+}
+
+body[data-theme="sage"] {
+  --bg-deep: #0c1210;
+  --bg-surface: #131c19;
+  --bg-elevated: #1b2823;
+  --bg-tray: #16211d;
+  --accent: #34d399;
+}
+
+body[data-theme="sand"] {
+  --bg-deep: #13110e;
+  --bg-surface: #1c1915;
+  --bg-elevated: #27221d;
+  --bg-tray: #201c17;
+  --accent: #f59e0b;
+}
+
+body[data-theme="ocean"] {
+  --bg-deep: #080f17;
+  --bg-surface: #0f1926;
+  --bg-elevated: #172536;
+  --bg-tray: #121e2d;
+  --accent: #38bdf8;
+}
+
+body.low-stim {
+  filter: saturate(0.76) contrast(0.94);
+}
+
+*, *::before, *::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+[hidden],
+.update-toast[hidden],
+.sheet-backdrop[hidden],
+.toy-stage[hidden] {
+  display: none !important;
+}
+
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100dvh;
+  overflow: hidden;
+  background: radial-gradient(circle at 50% 18%, var(--bg-surface) 0%, var(--bg-deep) 82%);
+  color: var(--text-main);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  touch-action: manipulation;
+}
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  width: 100%;
+  max-width: 500px;
+  height: 100dvh;
+  margin: 0 auto;
+  padding:
+    max(12px, env(safe-area-inset-top))
+    14px
+    max(14px, env(safe-area-inset-bottom));
+}
+
+/* =========================================================
+   1. ULTRA-MINIMAL TOP BAR
+   ========================================================= */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 44px;
+  padding: 0 4px;
+  flex-shrink: 0;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.brand-led {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-calm);
+  box-shadow: 0 0 10px var(--accent-calm);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.brand-title {
+  font-size: 0.96rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--text-main);
+}
+
+.ambient-dot-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--accent);
+  border: 1px solid rgba(56, 189, 248, 0.25);
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Quiet 3:00 Craving Pill with internal progress fill */
+.craving-pill {
+  position: relative;
+  overflow: hidden;
+  height: 34px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: 1px solid var(--border-highlight);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  font-weight: 600;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  transition: transform 0.12s ease, border-color 0.2s ease;
+}
+
+.craving-pill:active {
+  transform: scale(0.96);
+}
+
+.craving-pill.running {
+  border-color: rgba(245, 158, 11, 0.55);
+}
+
+.craving-pill-fill {
+  position: absolute;
+  inset: 0;
+  width: 0%;
+  background: linear-gradient(90deg, rgba(245, 158, 11, 0.26), rgba(52, 211, 153, 0.28));
+  transition: width 0.25s linear;
+  pointer-events: none;
+}
+
+.craving-pill-content {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.craving-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-warm);
+}
+
+.craving-pill.running .craving-dot {
+  box-shadow: 0 0 8px var(--accent-warm);
+}
+
+.install-pill {
+  height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  background: rgba(56, 189, 248, 0.12);
+  color: var(--accent);
+  font-size: 0.76rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+}
+
+.icon-circle-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border-highlight);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text-main);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: transform 0.12s ease, background 0.2s ease;
+}
+
+.icon-circle-btn.sm {
+  width: 32px;
+  height: 32px;
+  font-size: 0.85rem;
+}
+
+.icon-circle-btn:active {
+  transform: scale(0.93);
+}
+
+/* =========================================================
+   2. CENTER NEXT-GEN PHYSICS STAGE VIEWPORT
+   ========================================================= */
+.stage-viewport {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 0;
+  width: 100%;
+  position: relative;
+}
+
+.toy-stage {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.hardware-center {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+}
+
+.stage-stack {
+  justify-content: center;
+}
+
+/* Glass / Hardware Physics Chamber Frame */
+.chamber-frame {
+  width: min(88vw, 378px);
+  height: min(63dvh, 430px);
+  border-radius: 36px;
+  background:
+    radial-gradient(circle at 50% 18%, rgba(30, 41, 59, 0.65) 0%, rgba(10, 14, 21, 0.96) 100%);
+  border: 1px solid var(--border-highlight);
+  box-shadow: var(--shadow-hardware);
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  touch-action: none;
+}
+
+.chamber-frame.square-chamber {
+  width: min(86vw, 368px);
+  height: min(86vw, 368px);
+  border-radius: 40px;
+  transition: transform 0.36s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.chamber-frame.square-chamber.flipping {
+  transform: perspective(800px) rotateY(180deg) scale(0.93);
+}
+
+.chamber-frame canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.stage-bottom-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.minimal-pill-group {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+  border: 1px solid var(--border-subtle);
+  gap: 3px;
+}
+
+.quiet-pill {
+  height: 31px;
+  padding: 0 13px;
+  border-radius: 999px;
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+
+.quiet-pill.active {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-main);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+
+.quiet-icon-pill {
+  height: 37px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border-highlight);
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  transition: transform 0.12s ease, color 0.2s ease;
+}
+
+.quiet-icon-pill:active {
+  transform: scale(0.95);
+  color: var(--text-main);
+}
+
+/* =========================================================
+   5. SWITCH: CNC MACHINED MECHATRONIC POCKET DECK
+   ========================================================= */
+.cnc-pocket-module {
+  position: relative;
+  width: min(90vw, 378px);
+  padding: 20px 16px;
+  border-radius: 34px;
+  background: linear-gradient(155deg, #212836 0%, #131821 55%, #0e1219 100%);
+  border: 1px solid var(--border-highlight);
+  box-shadow: var(--shadow-hardware);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Corner Torx Screws */
+.cnc-screw {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #475569, #1e293b 70%);
+  box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.85), 0 1px 0 rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+.cnc-screw.tl { top: 11px; left: 11px; }
+.cnc-screw.tr { top: 11px; right: 11px; }
+.cnc-screw.bl { bottom: 11px; left: 11px; }
+.cnc-screw.br { bottom: 11px; right: 11px; }
+
+.cnc-well {
+  border-radius: 22px;
+  background: #0d1118;
+  box-shadow: var(--shadow-well);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.cnc-top-row {
+  display: grid;
+  grid-template-columns: 1fr 1.15fr;
+  gap: 12px;
+  height: 152px;
+}
+
+.slider-well,
+.dial-well {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  overflow: hidden;
+  touch-action: none;
+}
+
+#sliderCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+  cursor: grab;
+}
+
+.knurled-dial-mount {
+  width: 134px;
+  height: 134px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  touch-action: none;
+}
+
+#dialCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Middle Keycap Bay: 4 Sculpted High-Profile Keycaps */
+.keycap-bay {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  padding: 11px;
+}
+
+.sculpted-key {
+  position: relative;
+  height: 64px;
+  border: none;
+  border-radius: 15px;
+  padding: 0;
+  background: #090c10;
+  box-shadow:
+    inset 0 2px 5px rgba(0, 0, 0, 0.9),
+    0 1px 0 rgba(255, 255, 255, 0.05);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.sculpted-key .key-top {
+  position: absolute;
+  inset: 3px 3px 8px 3px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #334155 0%, #1e293b 100%);
+  box-shadow:
+    0 6px 0 #0f172a,
+    0 8px 12px rgba(0, 0, 0, 0.65),
+    inset 0 1px 1px rgba(255, 255, 255, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.045s cubic-bezier(0.2, 1, 0.3, 1), box-shadow 0.045s ease;
+}
+
+.sculpted-key .key-dish {
+  width: 74%;
+  height: 70%;
+  border-radius: 9px;
+  background: radial-gradient(circle at 50% 30%, rgba(15, 23, 42, 0.35), rgba(255, 255, 255, 0.06));
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.key-symbol {
+  font-size: 0.9rem;
+  color: rgba(255, 255, 255, 0.78);
+}
+
+/* Distinct Keycap Colorways */
+.sculpted-key.key-accent .key-top {
+  background: linear-gradient(180deg, #38bdf8 0%, #0284c7 100%);
+  box-shadow:
+    0 6px 0 #075985,
+    0 8px 12px rgba(0, 0, 0, 0.65),
+    inset 0 1px 1px rgba(255, 255, 255, 0.4);
+}
+.sculpted-key.key-accent .key-symbol {
+  color: #082f49;
+}
+
+.sculpted-key.key-tactile .key-top {
+  background: linear-gradient(180deg, #f59e0b 0%, #d97706 100%);
+  box-shadow:
+    0 6px 0 #92400e,
+    0 8px 12px rgba(0, 0, 0, 0.65),
+    inset 0 1px 1px rgba(255, 255, 255, 0.4);
+}
+.sculpted-key.key-tactile .key-symbol {
+  color: #451a03;
+}
+
+.sculpted-key.pressed .key-top,
+.sculpted-key:active .key-top {
+  transform: translateY(5px);
+  box-shadow:
+    0 1px 0 #0f172a,
+    0 2px 4px rgba(0, 0, 0, 0.5),
+    inset 0 1px 1px rgba(255, 255, 255, 0.18);
+}
+
+/* Bottom Carved Obsidian Gravity Dish + Rolling Chrome Sphere */
+.worry-cavity {
+  position: relative;
+  height: 112px;
+  border-radius: 24px;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background: #070a0f;
+}
+
+#orbitDishCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  touch-action: none;
+}
+
+/* =========================================================
+   6. BREATHE: 3D REFRACTIVE GLASS & PARTICLE CORE
+   ========================================================= */
+.breathe-canvas-wrap {
+  width: min(86vw, 360px);
+  height: min(86vw, 360px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  touch-action: none;
+  border-radius: 50%;
+}
+
+#breatheCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* =========================================================
+   FLOATING BOTTOM DOCK (6 TABS)
+   ========================================================= */
+.bottom-dock-wrap {
+  display: flex;
+  justify-content: center;
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+
+.bottom-dock {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  width: 100%;
+  max-width: 440px;
+  padding: 5px;
+  border-radius: 24px;
+  background: rgba(20, 25, 35, 0.9);
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  border: 1px solid var(--border-highlight);
+  box-shadow:
+    0 18px 38px rgba(0, 0, 0, 0.65),
+    inset 0 1px 0 rgba(255, 255, 255, 0.08);
+}
+
+.dock-tab {
+  height: 50px;
+  border: none;
+  border-radius: 18px;
+  background: transparent;
+  color: var(--text-dim);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: color 0.18s ease, background 0.18s ease, transform 0.12s ease;
+  padding: 0 2px;
+}
+
+.dock-tab:active {
+  transform: scale(0.95);
+}
+
+.dock-tab.active {
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text-main);
+  box-shadow: inset 0 1px 1px rgba(255, 255, 255, 0.12);
+}
+
+/* =========================================================
+   SLIDE-UP STUDIO SETTINGS SHEET
+   ========================================================= */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(4, 6, 10, 0.72);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.sheet-card {
+  width: 100%;
+  max-width: 480px;
+  max-height: 86dvh;
+  background: var(--bg-surface);
+  border-top: 1px solid var(--border-highlight);
+  border-radius: 28px 28px 0 0;
+  padding: 10px 18px max(20px, env(safe-area-inset-bottom));
+  box-shadow: 0 -20px 50px rgba(0, 0, 0, 0.75);
+  overflow-y: auto;
+}
+
+.sheet-handle {
+  width: 38px;
+  height: 4px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  margin: 2px auto 12px;
+}
+
+.sheet-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.sheet-header h2 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 650;
+}
+
+.sheet-body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.sheet-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sheet-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.sheet-label {
+  font-size: 0.74rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.sheet-value {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--accent);
+}
+
+.toggle-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.sheet-toggle-btn {
+  text-align: left;
+  padding: 11px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-main);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  cursor: pointer;
+}
+
+.sheet-toggle-btn.active {
+  border-color: rgba(56, 189, 248, 0.45);
+  background: rgba(56, 189, 248, 0.11);
+}
+
+.toggle-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.toggle-sub {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+}
+
+.segmented-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.seg-choice {
+  height: 36px;
+  border-radius: 11px;
+  border: 1px solid var(--border-subtle);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.seg-choice.active {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text-main);
+  border-color: var(--border-highlight);
+}
+
+.sheet-footer {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.milestone-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+.micro-link-btn {
+  margin-left: auto;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-subtle);
+  color: var(--text-main);
+  padding: 4px 9px;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.micro-link-btn.danger {
+  color: #fda4af;
+}
+
+.wellness-box {
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid var(--border-subtle);
+  font-size: 0.7rem;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.wellness-box p {
+  margin: 0 0 8px;
+}
+
+.wellness-links {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.wellness-links a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+/* Update Toast */
+.update-toast {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 120;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-highlight);
+  padding: 8px 14px;
+  border-radius: 999px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.78rem;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+}
+
+.toast-btn {
+  background: var(--accent);
+  color: #06131f;
+  border: none;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  cursor: pointer;
+}

@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0d1015">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="description" content="SteadyHands — Next-generation tactile physics, sensory regulation, 3-minute craving relief, and focus studio.">
+  <title>SteadyHands v2 Preview</title>
+  <link rel="manifest" href="../manifest.json">
+  <link rel="icon" type="image/png" sizes="192x192" href="../icons/icon-192.png">
+  <link rel="apple-touch-icon" href="../icons/icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+  <link rel="stylesheet" href="./v2.css">
+</head>
+<body data-theme="obsidian">
+  <!-- Subtle Service Worker Update Toast (hidden unless an update is waiting) -->
+  <div id="updateBanner" class="update-toast" hidden role="status" aria-live="polite">
+    <span>Update ready</span>
+    <button id="reloadSwBtn" class="toast-btn" type="button">Refresh</button>
+  </div>
+
+  <div class="app-shell">
+    <!-- ULTRA-CLEAN SINGLE-ROW TOP BAR -->
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-led" id="brandLed" aria-hidden="true"></span>
+        <span class="brand-title">SteadyHands</span>
+        <span class="ambient-dot-label" id="ambientBadge" hidden>Brown</span>
+      </div>
+
+      <div class="topbar-actions">
+        <!-- 1. Quiet 3:00 Craving Surf Pill (progress fills inside the pill itself) -->
+        <button id="urgeTimerBtn" class="craving-pill" type="button" aria-pressed="false" title="3-Minute Craving Timer">
+          <span class="craving-pill-fill" id="urgeProgressFill"></span>
+          <span class="craving-pill-content">
+            <span class="craving-dot" aria-hidden="true"></span>
+            <span id="urgeTimerText">3:00</span>
+          </span>
+        </button>
+
+        <!-- 2. Clean Install Pill (hidden when already installed) -->
+        <button id="installTopBtn" class="install-pill" type="button" hidden title="Install App">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/>
+          </svg>
+          <span>Install</span>
+        </button>
+
+        <!-- 3. Single Studio Settings / Sound Drawer Trigger -->
+        <button id="drawerBtn" class="icon-circle-btn" type="button" aria-label="Studio Settings & Sound" title="Settings & Sound">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <line x1="4" y1="7" x2="20" y2="7"/>
+            <line x1="4" y1="17" x2="20" y2="17"/>
+            <circle cx="9" cy="7" r="2.5" fill="var(--bg-elevated)"/>
+            <circle cx="15" cy="17" r="2.5" fill="var(--bg-elevated)"/>
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <!-- CENTER NEXT-GEN PHYSICS STAGE -->
+    <main class="stage-viewport v2-stage">
+      <canvas id="stage3d" touch-action="none"></canvas>
+      <div class="v2-hud">
+        <div id="hudTitle" class="v2-hud-title"></div>
+        <div id="hudMeter" class="v2-meter"><span id="hudMeterFill"></span></div>
+        <div id="hudSub" class="v2-hud-sub"></div>
+      </div>
+      <div class="v2-actions" id="v2Actions"></div>
+      <div id="v2Loading" class="v2-loading">Loading physics…</div>
+    </main>
+
+    <!-- FLOATING MATTE HARDWARE BOTTOM DOCK (6 Next-Gen Physics Instruments) -->
+    <nav class="bottom-dock-wrap" aria-label="Toys"><div class="bottom-dock" role="tablist"><button type="button" class="dock-tab active" role="tab" aria-selected="1" data-tab="balloon"><span>Balloon</span></button><button type="button" class="dock-tab" role="tab" aria-selected="0" data-tab="pour"><span>Pour</span></button><button type="button" class="dock-tab" role="tab" aria-selected="0" data-tab="beads"><span>Beads</span></button></div></nav>
+  </div>
+
+  <!-- SLIDE-UP STUDIO SETTINGS & SENSORY SHEET -->
+  <div id="settingsSheet" class="sheet-backdrop" hidden role="dialog" aria-modal="true" aria-labelledby="sheetTitle">
+    <div class="sheet-card">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <div class="sheet-header">
+        <h2 id="sheetTitle">Studio &amp; Sensory Controls</h2>
+        <button id="closeSheetBtn" class="icon-circle-btn sm" type="button" aria-label="Close Settings">✕</button>
+      </div>
+
+      <div class="sheet-body">
+        <!-- Sensory & Audio Toggles -->
+        <div class="sheet-section">
+          <span class="sheet-label">Sensory Regulation</span>
+          <div class="toggle-grid">
+            <button id="lowStimBtn" type="button" class="sheet-toggle-btn" aria-pressed="false">
+              <span class="toggle-title">Low-Stim Calm</span>
+              <span class="toggle-sub">820Hz warm filter &amp; softer motion</span>
+            </button>
+            <button id="pitchModeBtn" type="button" class="sheet-toggle-btn" aria-pressed="false">
+              <span class="toggle-title">Uniform Pitch</span>
+              <span class="toggle-sub">Predictable tone on every action</span>
+            </button>
+            <button id="soundToggleBtn" type="button" class="sheet-toggle-btn active" aria-pressed="true">
+              <span class="toggle-title">Tactile Audio</span>
+              <span class="toggle-sub" id="soundStatusText">On (Synthesized)</span>
+            </button>
+            <button id="hapticToggleBtn" type="button" class="sheet-toggle-btn active" aria-pressed="true">
+              <span class="toggle-title">Haptic Pulse</span>
+              <span class="toggle-sub" id="hapticStatusText">On (Device vibrate)</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Ambient Focus Noise -->
+        <div class="sheet-section">
+          <span class="sheet-label">Offline Focus Soundscape</span>
+          <div class="segmented-row" id="ambientGroup" role="group" aria-label="Ambient Sound">
+            <button type="button" class="seg-choice active" data-ambient="off">Off</button>
+            <button type="button" class="seg-choice" data-ambient="brown">Brown Noise</button>
+            <button type="button" class="seg-choice" data-ambient="rain">Soft Rain</button>
+            <button type="button" class="seg-choice" data-ambient="hum40">40Hz Hum</button>
+          </div>
+        </div>
+
+        <!-- Focus Session Timer -->
+        <div class="sheet-section">
+          <div class="sheet-label-row">
+            <span class="sheet-label">Focus Timer</span>
+            <span id="focusRemainingText" class="sheet-value">Off</span>
+          </div>
+          <div class="segmented-row" id="focusGroup" role="group" aria-label="Focus Timer">
+            <button type="button" class="seg-choice active" data-focus="0">Off</button>
+            <button type="button" class="seg-choice" data-focus="300">5 min</button>
+            <button type="button" class="seg-choice" data-focus="900">15 min</button>
+            <button type="button" class="seg-choice" data-focus="1500">25 min</button>
+          </div>
+        </div>
+
+        <!-- Studio Finish / Palette -->
+        <div class="sheet-section">
+          <span class="sheet-label">Surface Palette</span>
+          <div class="segmented-row" id="themeGroup" role="group" aria-label="Color Theme">
+            <button type="button" class="seg-choice active" data-theme-choice="obsidian">Obsidian</button>
+            <button type="button" class="seg-choice" data-theme-choice="sage">Sage</button>
+            <button type="button" class="seg-choice" data-theme-choice="sand">Warm Sand</button>
+            <button type="button" class="seg-choice" data-theme-choice="ocean">Deep Ocean</button>
+          </div>
+        </div>
+
+        <!-- Discrete On-Device Milestones & Privacy / Wellness Disclaimer -->
+        <div class="sheet-footer">
+          <div class="milestone-strip">
+            <span>Urges surfed: <strong id="urgesSurfedCount">0</strong></span>
+            <span>·</span>
+            <span>Tactile actions: <strong id="totalInteractionsCount">0</strong></span>
+            <button id="logUrgeSurfedBtn" type="button" class="micro-link-btn">+1 Urge</button>
+          </div>
+
+          <div class="wellness-box">
+            <p><strong>Wellness &amp; Privacy Notice:</strong> SteadyHands is a non-medical sensory regulation, craving distraction, and focus companion. It does not provide medical advice or clinical treatment, and collects <strong>zero personal data</strong> (100% offline on-device storage).</p>
+            <div class="wellness-links">
+              <a href="../privacy.html" target="_blank" rel="noopener">Full Privacy Policy &amp; Wellness Disclaimer ↗</a>
+              <button id="resetDataBtn" type="button" class="micro-link-btn danger">Reset Local Stats</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="./vendor/babylon.js"></script>
+  <script src="./vendor/HavokPhysics_umd.js"></script>
+  <script src="./vendor/Box2D.js"></script>
+  <script type="module" src="./js/main.js"></script>
+</body>
+</html>
